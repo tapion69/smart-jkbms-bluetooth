@@ -1,9 +1,4 @@
 configuration:
-  node_red_user:
-    name: Utilisateur Node-RED
-    description: Identifiant pour accéder à l'éditeur sur le port 1895.
-  node_red_password:
-    name: Mot de passe Node-RED
     description: Obligatoire pour démarrer l'interface, ne pas laisser vide.
   bluetooth_adapter:
     name: Adaptateur Bluetooth

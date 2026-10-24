@@ -8,7 +8,7 @@ RUN apk add --no-cache \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir bleak==3.0.2 \
     && npm install --global --no-audit --no-fund --unsafe-perm \
-         node-red@5.0.9 bcryptjs@2.4.3 \
+         node-red@5.0.9 \
     && npm cache clean --force
 
 COPY . /addon

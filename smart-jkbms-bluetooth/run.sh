@@ -10,14 +10,6 @@ if [[ ! -f "$OPTIONS" ]]; then
   exit 1
 fi
 
-NODE_RED_USER="$(jq -r '.node_red_user // "admin"' "$OPTIONS")"
-NODE_RED_PASSWORD="$(jq -r '.node_red_password // ""' "$OPTIONS")"
-if [[ -z "$NODE_RED_PASSWORD" ]]; then
-  echo "[ERROR] Please set node_red_password in Smart JK-BMS Bluetooth add-on options."
-  exit 1
-fi
-export NODE_RED_USER NODE_RED_PASSWORD
-
 # One secret per installation. Never print secret values.
 for secret_file in /data/.nodered_credential_secret /data/.ble_bridge_token; do
   if [[ ! -s "$secret_file" ]]; then
@@ -47,7 +39,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.1.0"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.1.1"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting Node-RED and BLE diagnostics bridge"
 

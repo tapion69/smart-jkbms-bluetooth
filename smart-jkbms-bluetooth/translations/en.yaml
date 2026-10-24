@@ -1,9 +1,4 @@
 configuration:
-  node_red_user:
-    name: Node-RED username
-    description: Username for the Node-RED editor on port 1895.
-  node_red_password:
-    name: Node-RED password
     description: Required for startup; do not leave blank.
   bluetooth_adapter:
     name: Bluetooth adapter
