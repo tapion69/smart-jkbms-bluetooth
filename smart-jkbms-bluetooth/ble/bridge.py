@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.0.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.2.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -24,14 +24,13 @@ FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
 MAC_PATTERN = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
 
 
-def emit(event_type: str, **data: Any) -> None:
+def emit(event_type: str, **data: Any) -> bool:
     event = {"type": event_type, "time": time.time(), **data}
-    LOG.info("BLE event: %s", json.dumps(event, ensure_ascii=False))
     url = os.environ.get("BLE_BRIDGE_ENDPOINT", "http://127.0.0.1:1895/internal/ble/events")
     token = os.environ.get("BLE_BRIDGE_TOKEN", "")
     if not token:
         LOG.error("Missing internal bridge token")
-        return
+        return False
     body = json.dumps(event, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -43,12 +42,17 @@ def emit(event_type: str, **data: Any) -> None:
         with urllib.request.urlopen(request, timeout=3) as response:
             if response.status not in (200, 202, 204):
                 LOG.warning("Node-RED bridge response status: %d", response.status)
+                return False
+        LOG.info("BLE event: %s", json.dumps(event, ensure_ascii=False))
+        return True
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        LOG.warning("Node-RED event forwarding failed: %s", exc)
+        if event_type != "bridge_start":
+            LOG.warning("Node-RED event forwarding failed: %s", exc)
+        return False
 
 
-async def forward(event_type: str, **data: Any) -> None:
-    await asyncio.to_thread(emit, event_type, **data)
+async def forward(event_type: str, **data: Any) -> bool:
+    return await asyncio.to_thread(emit, event_type, **data)
 
 
 def options() -> dict[str, Any]:
@@ -78,6 +82,7 @@ async def scan(cfg: dict[str, Any]) -> None:
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     duration = int(cfg.get("scan_duration_seconds", 8))
     show_all = bool(cfg.get("scan_all_devices", False))
+    known_addresses = set(addresses(str(cfg.get("bms_addresses", ""))))
     await forward("scan_start", adapter=adapter, duration_seconds=duration)
     try:
         detected = await BleakScanner.discover(
@@ -86,7 +91,7 @@ async def scan(cfg: dict[str, Any]) -> None:
         jk_count = 0
         for address, (device, advertisement) in detected.items():
             name = (advertisement.local_name or device.name or "").strip()
-            is_candidate = "JK" in name.upper() or "BMS" in name.upper()
+            is_candidate = "JK" in name.upper() or "BMS" in name.upper() or address.upper() in known_addresses
             if not show_all and not is_candidate:
                 continue
             if is_candidate:
@@ -131,15 +136,35 @@ async def probe(address: str, cfg: dict[str, Any]) -> None:
                 await asyncio.sleep(min(listen, 5))
                 return
 
+            at_notifications = {"last_report": 0.0, "count": 0}
+
             def on_notification(_characteristic: Any, data: bytearray) -> None:
-                # BLE notifications can be fragments, not valid complete JK frames.
+                # BLE notifications can be fragments, not complete JK frames.
+                raw = bytes(data)
+                if raw == b"AT\r\n":
+                    at_notifications["count"] += 1
+                    now = time.monotonic()
+                    # Repeated ASCII AT/CRLF messages are not JK02 frames;
+                    # summarize them instead of flooding logs and Node-RED.
+                    if now - at_notifications["last_report"] < 10.0:
+                        return
+                    at_notifications["last_report"] = now
+                    asyncio.create_task(
+                        forward(
+                            "unrecognized_at",
+                            address=address,
+                            sample_hex="41 54 0D 0A",
+                            count_since_connection=at_notifications["count"],
+                        )
+                    )
+                    return
                 asyncio.create_task(
                     forward(
                         "raw_notification",
                         address=address,
                         characteristic=FFE1,
-                        length=len(data),
-                        hex=bytes(data).hex(" ").upper(),
+                        length=len(raw),
+                        hex=raw.hex(" ").upper(),
                     )
                 )
 
@@ -155,7 +180,15 @@ async def probe(address: str, cfg: dict[str, Any]) -> None:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    await forward("bridge_start", version="0.1.0", note="read_only_discovery_and_connection_probe")
+    attempt = 0
+    while not await forward(
+        "bridge_start", version="0.1.2", note="read_only_discovery_and_connection_probe"
+    ):
+        if attempt % 10 == 0:
+            LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
+        attempt += 1
+        await asyncio.sleep(1)
+    LOG.info("Node-RED diagnostic endpoint ready")
     while True:
         try:
             cfg = options()
