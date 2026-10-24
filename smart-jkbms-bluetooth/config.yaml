@@ -1,0 +1,38 @@
+name: Smart JK-BMS Bluetooth (Development)
+version: "0.1.0"
+slug: smart_jkbms_ble
+description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
+startup: services
+boot: auto
+init: false
+arch:
+  - amd64
+  - aarch64
+host_dbus: true
+host_network: false
+ingress: false
+ports:
+  "1895/tcp": 1895
+ports_description:
+  "1895/tcp": Node-RED editor (LAN or VPN)
+panel_icon: mdi:bluetooth
+options:
+  node_red_user: admin
+  node_red_password: ""
+  bluetooth_adapter: auto
+  scan_interval_seconds: 45
+  scan_duration_seconds: 8
+  scan_all_devices: false
+  bms_addresses: ""
+  connection_probe_seconds: 15
+  debug_mode: true
+schema:
+  node_red_user: str
+  node_red_password: password
+  bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
+  scan_interval_seconds: int(20,300)
+  scan_duration_seconds: int(3,20)
+  scan_all_devices: bool
+  bms_addresses: str?
+  connection_probe_seconds: int(5,60)
+  debug_mode: bool

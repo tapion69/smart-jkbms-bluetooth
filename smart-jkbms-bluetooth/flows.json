@@ -1,0 +1,115 @@
+[
+  {
+    "id": "f03b52e846d017a1",
+    "type": "tab",
+    "label": "Bluetooth | Diagnostics",
+    "disabled": false,
+    "info": "Smart JK-BMS Bluetooth 0.1.0. BLE scan and connection probe only. No BMS measurements are decoded in this milestone."
+  },
+  {
+    "id": "e9d101defafdb611",
+    "type": "comment",
+    "z": "f03b52e846d017a1",
+    "name": "0.1.0 – BLE scan + raw diagnostics. No BMS write commands.",
+    "info": "Python Bleak sends JSON events to a localhost HTTP endpoint authenticated by a per-installation token.",
+    "x": 400,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "9f55b622d2a19435",
+    "type": "http in",
+    "z": "f03b52e846d017a1",
+    "name": "Internal BLE events",
+    "url": "/internal/ble/events",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 160,
+    "wires": [
+      [
+        "4b92c212e2df6732"
+      ]
+    ]
+  },
+  {
+    "id": "4b92c212e2df6732",
+    "type": "function",
+    "z": "f03b52e846d017a1",
+    "name": "Validate internal token + ACK",
+    "func": "const expected = env.get('BLE_BRIDGE_TOKEN');\nconst provided = msg.req && msg.req.headers && msg.req.headers['x-ble-bridge-token'];\nif (!expected || provided !== expected) {\n    return [null, {...msg, statusCode:401, payload:{error:'Unauthorized'}}];\n}\nlet event = msg.payload;\nif (typeof event === 'string') {\n    try { event = JSON.parse(event); }\n    catch (_) { return [null, {...msg, statusCode:400, payload:{error:'Invalid JSON'}}]; }\n}\nif (!event || typeof event !== 'object' || typeof event.type !== 'string') {\n    return [null, {...msg, statusCode:400, payload:{error:'Invalid event'}}];\n}\nreturn [\n  {topic: 'ble/' + event.type, payload:event},\n  {...msg, statusCode:202, payload:{ok:true}}\n];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 160,
+    "wires": [
+      [
+        "136f1472850339d1"
+      ],
+      [
+        "ce2907288629f034"
+      ]
+    ]
+  },
+  {
+    "id": "ce2907288629f034",
+    "type": "http response",
+    "z": "f03b52e846d017a1",
+    "name": "HTTP response (202/4xx)",
+    "statusCode": "",
+    "headers": {},
+    "x": 680,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "136f1472850339d1",
+    "type": "function",
+    "z": "f03b52e846d017a1",
+    "name": "BLE health / last events",
+    "func": "const event = msg.payload;\nif (event.type === 'device_found') {\n  const seen = context.get('seen') || {};\n  seen[event.address] = {name:event.name, rssi:event.rssi, last_seen:event.time};\n  context.set('seen', seen);\n}\ncontext.set('last_event', event);\nconst errors = new Set(['scan_error','connection_error']);\nif (errors.has(event.type)) {\n  node.status({fill:'red',shape:'ring',text:event.type});\n} else if (event.type === 'connected') {\n  node.status({fill:'green',shape:'dot',text:'connected ' + event.address});\n} else if (event.type === 'scan_complete') {\n  node.status({fill:'blue',shape:'dot',text:'scan: ' + event.jk_candidates + ' JK candidates'});\n}\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 690,
+    "y": 160,
+    "wires": [
+      [
+        "d4cb3acdbe43f291"
+      ]
+    ]
+  },
+  {
+    "id": "d4cb3acdbe43f291",
+    "type": "debug",
+    "z": "f03b52e846d017a1",
+    "name": "BLE raw and diagnostics",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 930,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "7474b3a8e3186203",
+    "type": "comment",
+    "z": "f03b52e846d017a1",
+    "name": "Next: JK02 commands → frame reconstruction → decoding → MQTT",
+    "info": "This prototype does not publish JK-BMS measurements, HA MQTT entities or write BMS settings.",
+    "x": 380,
+    "y": 300,
+    "wires": []
+  }
+]

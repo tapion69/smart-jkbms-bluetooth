@@ -1,0 +1,28 @@
+configuration:
+  node_red_user:
+    name: Utilisateur Node-RED
+    description: Identifiant pour accéder à l'éditeur sur le port 1895.
+  node_red_password:
+    name: Mot de passe Node-RED
+    description: Obligatoire pour démarrer l'interface, ne pas laisser vide.
+  bluetooth_adapter:
+    name: Adaptateur Bluetooth
+    description: auto pour utiliser BlueZ automatiquement, ou hci0/hci1 pour choisir.
+  scan_interval_seconds:
+    name: Pause entre cycles BLE (secondes)
+    description: Temps d'attente après recherche et essais de connexion.
+  scan_duration_seconds:
+    name: Durée de recherche BLE (secondes)
+    description: Durée de chaque recherche des périphériques Bluetooth à proximité.
+  scan_all_devices:
+    name: Afficher tous les appareils BLE
+    description: Afficher aussi les périphériques non identifiés comme JK-BMS.
+  bms_addresses:
+    name: Adresses Bluetooth JK-BMS
+    description: Adresses MAC séparées par des virgules. Vider pour découvrir uniquement.
+  connection_probe_seconds:
+    name: Durée de connexion d'essai (secondes)
+    description: Connexion Bluetooth en lecture seule, sans commande de lecture JK-BMS.
+  debug_mode:
+    name: Diagnostic détaillé
+    description: Réservé aux tests initiaux.

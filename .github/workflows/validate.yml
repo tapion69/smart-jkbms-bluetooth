@@ -1,0 +1,28 @@
+name: Validate Bluetooth add-on source
+on:
+  push:
+  pull_request:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate JSON and Python syntax
+        run: |
+          python -m json.tool repository.json >/dev/null
+          python -m json.tool smart-jkbms-bluetooth/flows.json >/dev/null
+          python -m py_compile smart-jkbms-bluetooth/ble/bridge.py
+      - name: Validate YAML files
+        run: |
+          pip install 'PyYAML==6.0.2'
+          python - <<'PY'
+          import yaml
+          from pathlib import Path
+          paths = [Path('smart-jkbms-bluetooth/config.yaml'), *Path('smart-jkbms-bluetooth/translations').glob('*.yaml')]
+          for path in paths:
+              yaml.safe_load(path.read_text())
+              print('OK', path)
+          PY
