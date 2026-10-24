@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.2.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.3.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
+from bleak.exc import BleakDeviceNotFoundError
 
 LOG = logging.getLogger("smart_jkbms_ble")
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
@@ -78,7 +80,7 @@ def addresses(raw: str) -> list[str]:
     return result
 
 
-async def scan(cfg: dict[str, Any]) -> None:
+async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     duration = int(cfg.get("scan_duration_seconds", 8))
     show_all = bool(cfg.get("scan_all_devices", False))
@@ -89,7 +91,9 @@ async def scan(cfg: dict[str, Any]) -> None:
             timeout=duration, return_adv=True, **scan_kwargs(adapter)
         )
         jk_count = 0
+        found: dict[str, BLEDevice] = {}
         for address, (device, advertisement) in detected.items():
+            found[address.upper()] = device
             name = (advertisement.local_name or device.name or "").strip()
             is_candidate = "JK" in name.upper() or "BMS" in name.upper() or address.upper() in known_addresses
             if not show_all and not is_candidate:
@@ -106,19 +110,21 @@ async def scan(cfg: dict[str, Any]) -> None:
                 adapter=adapter,
             )
         await forward("scan_complete", scanned_count=len(detected), jk_candidates=jk_count)
+        return found
     except Exception as exc:
         LOG.exception("BLE discovery failed")
         await forward("scan_error", adapter=adapter, error=f"{type(exc).__name__}: {exc}")
+        return {}
 
 
-async def probe(address: str, cfg: dict[str, Any]) -> None:
+async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     listen = int(cfg.get("connection_probe_seconds", 15))
     await forward("connection_start", address=address)
     try:
         kwargs = scan_kwargs(adapter)
         # Talks to host BlueZ over D-Bus; does not take control of the HCI adapter.
-        async with BleakClient(address, timeout=15, **kwargs) as client:
+        async with BleakClient(device, timeout=15, **kwargs) as client:
             services = list(client.services)
             characteristics = [c for s in services for c in s.characteristics]
             chosen = next(
@@ -171,6 +177,9 @@ async def probe(address: str, cfg: dict[str, Any]) -> None:
             await client.start_notify(chosen, on_notification)
             await asyncio.sleep(listen)
             await client.stop_notify(chosen)
+    except BleakDeviceNotFoundError as exc:
+        LOG.warning("Discovered BLE device disappeared before connection: %s", address)
+        await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}", retry_on_next_scan=True)
     except Exception as exc:
         LOG.exception("BLE connection probe failed for %s", address)
         await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}")
@@ -182,7 +191,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.2", note="read_only_discovery_and_connection_probe"
+        "bridge_start", version="0.1.3", note="read_only_discovery_and_connection_probe"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -192,9 +201,13 @@ async def main() -> None:
     while True:
         try:
             cfg = options()
-            await scan(cfg)
+            detected = await scan(cfg)
             for address in addresses(str(cfg.get("bms_addresses", ""))):
-                await probe(address, cfg)
+                device = detected.get(address)
+                if device is None:
+                    await forward("device_not_seen", address=address, message="Not advertised in this scan; retry next cycle")
+                    continue
+                await probe(address, cfg, device)
             await asyncio.sleep(max(20, int(cfg.get("scan_interval_seconds", 45))))
         except asyncio.CancelledError:
             raise
