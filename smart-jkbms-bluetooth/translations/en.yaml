@@ -1,5 +1,4 @@
 configuration:
-    description: Required for startup; do not leave blank.
   bluetooth_adapter:
     name: Bluetooth adapter
     description: Auto selects a BlueZ adapter; choose hci0/hci1 to select manually.

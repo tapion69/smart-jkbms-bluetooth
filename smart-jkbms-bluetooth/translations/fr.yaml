@@ -1,5 +1,4 @@
 configuration:
-    description: Obligatoire pour démarrer l'interface, ne pas laisser vide.
   bluetooth_adapter:
     name: Adaptateur Bluetooth
     description: auto pour utiliser BlueZ automatiquement, ou hci0/hci1 pour choisir.
