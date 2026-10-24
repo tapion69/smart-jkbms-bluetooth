@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.1. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.2. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
@@ -13,7 +13,7 @@ Standalone Bluetooth add-on following the clean repository structure of Smart Vo
 - BLE service discovery and raw FFE1 notifications, if provided by the device.
 - Python-to-Node-RED local HTTP bridge protected by a random per-installation token.
 - A visual Node-RED tab: **Bluetooth | Diagnostics**.
-- Data under persistent /data; the user's Node-RED flows are not overwritten at every restart.
+- Persistent Node-RED flows loaded from `/data/node-red/flows.json` (not `/addon/flows.json`); user modifications are retained on restart.
 - Home Assistant options translated into French and English.
 
 **Not yet implemented:** JK02 read polling commands, verified BMS frame assembly, cell voltages, temperature, current, SOC, MQTT Discovery, dashboards, and BMS parameter changes. No BMS write commands are sent in this milestone.
@@ -58,7 +58,7 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
 - **Node-RED does not open:** verify add-on is running and port 1895 is not already taken.
 - **scan_error mentioning BlueZ or D-Bus:** verify the Bluetooth adapter is detected by Home Assistant. Some hosts may require additional Supervisor/AppArmor configuration; check the error before changing privileges.
 - **connection_error:** the app or BatMON may already be connected to the BMS, the MAC may be wrong, or the signal may be insufficient.
-- **connected but no SOC/cell data:** expected: these are not implemented in v0.1.0.
+- **connected but no SOC/cell data:** expected: measurement decoding is not implemented in v0.1.2. `41 54 0D 0A` is ASCII `AT` plus CR/LF, not a valid JK02 telemetry frame.
 
 ## Project layout
 
@@ -78,7 +78,7 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
 
 ## Development plan
 
-- 0.1.1: Node-RED editor port 1895; BLE discovery, raw events and diagnostics.
+- 0.1.2: Node-RED editor port 1895, persistent flow path, BLE discovery and diagnostics.
 - Later: validated JK-BMS read commands, framed responses, verified measurements.
 - Later: MQTT Discovery and battery diagnostics; optional dashboard integration.
 

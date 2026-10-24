@@ -31,7 +31,9 @@ export BLE_OPTIONS_FILE="$OPTIONS"
 
 NR_PID=""
 BLE_PID=""
+SHUTTING_DOWN=false
 shutdown() {
+  SHUTTING_DOWN=true
   trap - INT TERM EXIT
   if [[ -n "$BLE_PID" ]]; then kill "$BLE_PID" 2>/dev/null || true; fi
   if [[ -n "$NR_PID" ]]; then kill "$NR_PID" 2>/dev/null || true; fi
@@ -39,11 +41,11 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.1.1"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.1.2"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting Node-RED and BLE diagnostics bridge"
 
-node-red --userDir "$WORKDIR" --settings /addon/settings.js &
+node-red --userDir "$WORKDIR" --settings /addon/settings.js "$WORKDIR/flows.json" &
 NR_PID=$!
 /opt/venv/bin/python -u /addon/ble/bridge.py &
 BLE_PID=$!
@@ -52,5 +54,9 @@ set +e
 wait -n "$NR_PID" "$BLE_PID"
 EXIT_CODE=$?
 set -e
-echo "[ERROR] One add-on service exited ($EXIT_CODE); stopping both services"
+if [[ "$SHUTTING_DOWN" == "true" ]]; then
+  echo "[INFO] Add-on stopped normally by Home Assistant"
+  exit 0
+fi
+echo "[ERROR] One add-on service exited unexpectedly ($EXIT_CODE); stopping both services"
 exit 1

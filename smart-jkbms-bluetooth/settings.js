@@ -8,7 +8,7 @@ module.exports = {
   uiHost: "0.0.0.0",
   uiPort: 1895,
   userDir: "/data/node-red",
-  flowFile: "flows.json",
+  flowFile: "/data/node-red/flows.json",
   credentialSecret: secret,
   adminAuth: {
     type: "credentials",
