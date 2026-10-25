@@ -264,8 +264,8 @@ class MQTTTests(unittest.TestCase):
         base=m.discovery+"/"+ "binary_sensor/"+short_id(A)+"_"
         self.assertNotIn("pcl_module_active",state)
         self.assertNotIn("dry_contact_mask",state)
-        self.assertEqual(conf[base+"dry1_contact/config"]["name"],"DRY1 contact")
-        self.assertEqual(conf[base+"dry2_contact/config"]["name"],"DRY2 contact")
+        self.assertEqual(conf[base+"dry1_contact/config"]["name"],"16 DRY1 Contact")
+        self.assertEqual(conf[base+"dry2_contact/config"]["name"],"17 DRY2 Contact")
         self.assertEqual(conf[base+"online_status/config"]["state_topic"],
                          m.base(A)+"/availability")
         self.assertNotIn("availability_topic",conf[base+"online_status/config"])
@@ -544,6 +544,107 @@ class MQTTTests(unittest.TestCase):
                          "_cell_uvp_v/config",config)
         self.assertEqual(len({x["unique_id"] for x in config.values()}),len(config))
 
+    def test_v027_english_fixed_info_measurement_configuration_names(self):
+        from presentation import INFO_NAMES, MAIN_NAMES, CONFIG_STATUS_NAMES
+        m,c=self.instance()
+        data=sample_data(A)
+        data["extras"]["battery_type"]="LiFePO4"
+        data["extras"]["balancing_active"]=True
+        data["extras"]["pcl_module_active"]=False
+        self.assertTrue(m.ingest(data))
+        self.assertTrue(m.ingest({"kind":"frame","address":A,"frame_type":1,
+                                  "raw_hex":settings_frame()}))
+        f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 03")
+        f[6:17]=b"JK-PB2A16S1";f[22:26]=b"14XA"
+        f[30:35]=b"19.0b";f[46:55]=b"BMS Alpha"
+        f[78:84]=b"231118";f[86:97]=b"30925721340"
+        f[299]=sum(f[:299])&255
+        self.assertTrue(m.ingest({"kind":"frame","address":A,
+                                  "frame_type":3,"raw_hex":f.hex()}))
+        id=short_id(A)
+        configs={topic:json.loads(payload) for topic,payload,_,_
+                 in c.published if topic.endswith("/config") and payload}
+        def cfg(kind,key):
+            return configs[f"{m.discovery}/{kind}/{id}_{key}/config"]
+        self.assertEqual(cfg("binary_sensor","online_status")["name"],"01 Online")
+        self.assertEqual(cfg("sensor","battery_type")["name"],"02 Battery Type")
+        self.assertEqual(cfg("sensor","software_version")["name"],"03 Software Version")
+        self.assertEqual(cfg("sensor","hardware_version")["name"],"04 Hardware Version")
+        self.assertEqual(cfg("sensor","serial_number")["name"],"05 Serial Number")
+        self.assertEqual(cfg("sensor","device_name")["name"],"06 BMS Name")
+        self.assertEqual(cfg("sensor","manufacturing_date")["name"],"07 Manufacturing Date")
+        self.assertEqual(cfg("binary_sensor","alarm_active")["name"],"08 BMS Alarm Active")
+        self.assertEqual(cfg("sensor","alarm_text")["name"],"09 BMS Alarm List")
+        self.assertEqual(cfg("sensor","battery_type")["entity_category"],"diagnostic")
+        self.assertEqual(cfg("binary_sensor","charging_mos")["entity_category"],"diagnostic")
+        self.assertEqual(cfg("binary_sensor","balancing_active")["name"],"19 Balancing Active")
+        self.assertEqual(cfg("binary_sensor","pcl_module_active")["name"],"20 PCL Module Active")
+        for key,label in CONFIG_STATUS_NAMES.items():
+            with self.subTest(key=key):
+                readonly=cfg("binary_sensor","status_"+key)
+                self.assertEqual(readonly["name"],label)
+                self.assertEqual(readonly["entity_category"],"diagnostic")
+                self.assertNotIn("command_topic",readonly)
+                self.assertIn(key,readonly["value_template"])
+                writable_kind="switch"
+                editable=cfg(writable_kind,key)
+                self.assertEqual(editable["entity_category"],"config")
+                self.assertIn("command_topic",editable)
+        self.assertEqual(cfg("switch","write_permission")["name"],
+                         "Allow Parameter Changes")
+        self.assertEqual(cfg("sensor","soc_pct")["name"],"01 SOC")
+        self.assertEqual(cfg("sensor","voltage_v")["name"],"02 Total Voltage")
+        self.assertEqual(cfg("sensor","voltage_v")["suggested_display_precision"],2)
+        self.assertEqual(cfg("sensor","power_w")["name"],"03 Total Power")
+        self.assertEqual(cfg("sensor","current_a")["name"],"04 Total Current")
+        self.assertEqual(cfg("sensor","charge_power_w")["name"],"05 Charge Power")
+        self.assertEqual(cfg("sensor","discharge_power_w")["name"],"06 Discharge Power")
+        self.assertEqual(cfg("sensor","cell_avg_v")["name"],"07 Average Cell Voltage")
+        self.assertEqual(cfg("sensor","cell_delta_v")["name"],"08 Cell Voltage Delta")
+        self.assertEqual(cfg("sensor","cell_min_v")["name"],"09 Min Cell Voltage")
+        self.assertEqual(cfg("sensor","cell_min_number")["name"],"10 Min Cell Number")
+        self.assertEqual(cfg("sensor","cell_max_v")["name"],"11 Max Cell Voltage")
+        self.assertEqual(cfg("sensor","cell_max_number")["name"],"12 Max Cell Number")
+        self.assertEqual(cfg("sensor","balance_current_a")["name"],"13 Balance Current")
+        self.assertEqual(cfg("sensor","temp1_c")["name"],"14 Temperature Sensor 1")
+        self.assertEqual(cfg("sensor","temp2_c")["name"],"15 Temperature Sensor 2")
+        self.assertEqual(cfg("sensor","mos_temp_c")["name"],"16 MOS Temperature")
+        self.assertEqual(cfg("sensor","cell_01_v")["name"],"20 Cell 01 - 1 Voltage")
+        self.assertEqual(cfg("sensor","cell_01_resistance_ohm")["name"],
+                         "20 Cell 01 - 2 Resistance")
+        self.assertEqual(cfg("sensor","cell_16_v")["name"],"20 Cell 16 - 1 Voltage")
+        self.assertEqual(cfg("sensor","cycles")["name"],"80 Cycle Count")
+        for key in ("soc_pct","voltage_v","cell_min_number","cell_max_number",
+                    "temp1_c","cell_01_resistance_ohm","cycles"):
+            self.assertNotIn("entity_category",cfg("sensor",key))
+        self.assertEqual(cfg("sensor","cell_01_v")["suggested_display_precision"],3)
+        self.assertEqual(cfg("sensor","cell_01_resistance_ohm")["suggested_display_precision"],3)
+        self.assertEqual(cfg("binary_sensor","uart2_enabled")["name"],
+                         "40 UART2 Enabled")
+        self.assertEqual(cfg("binary_sensor","uart2_enabled")["entity_category"],
+                         "diagnostic")
+        self.assertTrue(all(value["name"].isascii() for value in configs.values()),
+                        "Entity display names must all be fixed English labels")
+        self.assertEqual(len(configs),len({v["unique_id"] for v in configs.values()}))
+
+    def test_v027_stable_identifiers_and_bms_names_with_reversed_mac_order(self):
+        a,ca=self.instance()
+        b,cb=self.instance()
+        b.addresses=[B,A]
+        self.assertEqual(a._device(A)["name"],b._device(A)["name"])
+        self.assertEqual(a._device(B)["name"],b._device(B)["name"])
+        self.assertEqual(a._device(A)["name"],"JK-BMS 1")
+        self.assertEqual(a._device(B)["name"],"JK-BMS 2")
+        a.ingest(sample_data(A))
+        b.ingest(sample_data(A))
+        original={(topic,json.loads(value)["unique_id"])
+                  for topic,value,_,_ in ca.published
+                  if topic.endswith("/config") and value}
+        reordered={(topic,json.loads(value)["unique_id"])
+                   for topic,value,_,_ in cb.published
+                   if topic.endswith("/config") and value}
+        self.assertEqual(original,reordered)
+
     def test_precision_names_and_volts_delta_discovery(self):
         m,c=self.instance()
         m.ingest(sample_data(A))
@@ -554,12 +655,12 @@ class MQTTTests(unittest.TestCase):
         ident=short_id(A)
         def item(component,key):
             return conf[f"{prefix}/{component}/{ident}_{key}/config"]
-        self.assertEqual(item("sensor","cell_01_v")["name"],"Cellule 01 - 1 Tension")
+        self.assertEqual(item("sensor","cell_01_v")["name"],"20 Cell 01 - 1 Voltage")
         self.assertEqual(item("sensor","cell_01_v")["suggested_display_precision"],3)
         self.assertEqual(item("sensor","cell_16_v")["suggested_display_precision"],3)
-        self.assertEqual(item("sensor","cell_01_resistance_ohm")["name"],"Cellule 01 - 2 Résistance")
-        self.assertEqual(item("sensor","voltage_v")["name"],"Tension_Totale_volt")
-        self.assertEqual(item("sensor","voltage_v")["suggested_display_precision"],1)
+        self.assertEqual(item("sensor","cell_01_resistance_ohm")["name"],"20 Cell 01 - 2 Resistance")
+        self.assertEqual(item("sensor","voltage_v")["name"],"02 Total Voltage")
+        self.assertEqual(item("sensor","voltage_v")["suggested_display_precision"],2)
         self.assertEqual(item("sensor","cell_delta_v")["unit_of_measurement"],"V")
         self.assertEqual(item("sensor","cell_delta_v")["suggested_display_precision"],3)
         self.assertEqual(item("number","cell_uvp_v")["mode"],"box")

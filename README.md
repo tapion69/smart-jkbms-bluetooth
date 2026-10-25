@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Version 0.2.6 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Version 0.2.7 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
 Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
@@ -111,3 +111,19 @@ A real Home Assistant failure was captured on 25 October 2026 while trying to sw
 **To test:** Update to v0.2.6, ensure `read_only_requests: true` and `persistent_connections: true`, and restart. After the BMS is online, enable `allow_temperature_control: true` only if you intentionally want to modify BMS settings, then turn on the per-BMS HA switch `Autoriser modification paramètres`. When you manually change `BMS balance switch`, check the diagnostic entity `Dernière commande paramètres` for `Lecture des paramètres BMS (0x96)`, `Confirmé par le BMS` or a precise refusal. Do not repeatedly click or disable important BMS protections to make a test pass.
 
 **Still to verify on the actual hardware:** whether the target BMS returns a valid type-0x01 settings packet in response to 0x96 (protocol and firmware vary). A successful CI test only verifies the software safety logic and synthetic 0x01 responses.
+
+## v0.2.7 — Fixed English MQTT entity names, organized native HA sections
+
+All **MQTT entity names** are now defined in a centralized English catalog (`ble/presentation.py`). They are stable across installations, languages and BLE device-advertised names. The **MAC-derived device and entity `unique_id` values and MQTT topics are unchanged**; existing automations and history should remain linked to the same entities. The two device labels `JK-BMS 1` and `JK-BMS 2` are assigned by sorting configured MAC addresses rather than trusting the user's configuration list order. For a different set of BMS addresses, labels can of course differ. Home Assistant registry overrides for manually renamed entities take precedence over new MQTT Discovery defaults.
+
+**Native Home Assistant sections:** MQTT Discovery supports **Sensors**, **Diagnostic**, and **Configuration**, not arbitrary renamed/reordered tabs. Exact custom tabs named "Info", "Sensors", "Parameters" require a separate Lovelace dashboard; this version intentionally does not add a redundant HTML UI or dashboard. Within Home Assistant's native page, information and all read-only switch statuses are assigned to **Diagnostic**; electrical measurements and cell pairs to the primary **Sensors** section; writable settings, including `Allow Parameter Changes`, remain in **Configuration**. A stable numeric prefix on English display labels guides alphabetical ordering, although Home Assistant ultimately controls layout.
+
+**Diagnostic (information and switch statuses):** Online, battery type, software/hardware version, hardware serial, BMS name, manufacture date, BMS alarm active/list and model. Physical states include charge/discharge MOS, precharge, heater, charger, DRY1/DRY2, emergency, balancing, PCL and UART2 when available. Ten documented parameter switches additionally expose their **BMS-confirmed ON/OFF state** as read-only `binary_sensor` entities (`status_<parameter_key>`) in Diagnostic, with distinct IDs from the editable controls in Configuration. These status entities are created only once a checksum-validated type-0x01 settings frame actually supplies the values. Unknown/unsupported optional data is not fabricated.
+
+**Primary sensors (fixed order by label):** 01 SOC, 02 Total Voltage (**2 decimals**), 03 Total Power, 04 Total Current, 05 Charge Power, 06 Discharge Power, 07 Average Cell Voltage, 08 Cell Voltage Delta, 09 Min Cell Voltage, 10 Min Cell Number, 11 Max Cell Voltage, 12 Max Cell Number, 13 Balance Current, then temperature probes T1/T2/MOS/T3/T4/T5, then 16 (or configured number of active) cell voltage/resistance pairs. The native labels follow `20 Cell 01 - 1 Voltage`, `20 Cell 01 - 2 Resistance`, etc., with each voltage and resistance displayed to **3 decimal places**. Other sensors (cycle count, SOH, capacities, runtime, recovery countdowns, etc.) follow those pairs.
+
+**Configuration:** All existing documented and range-checked MQTT `number`/`switch` entities keep their original English names and command topics. The per-BMS permission control is renamed `Allow Parameter Changes`. Verified 0x96 / 0x01 readback, authorization, BLE command throttling and non-optimistic write safety are unchanged.
+
+An old `uart2_enabled` *sensor* discovery topic is explicitly tombstoned before the same state becomes a proper read-only **binary sensor**. All other existing entity IDs keep their MQTT Discovery identifiers. No device deletion is necessary.
+
+**Limits:** MQTT Discovery cannot forcibly override entity names manually customized in Home Assistant's Entity Registry, nor can it force an exact visual order of native cards. Settings for an unavailable BMS remain unknown until a verified settings frame is received. User data, BLE passwords, HEX flags and raw diagnostic fields are not published.
