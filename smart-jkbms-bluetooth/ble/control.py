@@ -45,6 +45,7 @@ class ControlService:
         self.sessions: dict[str, asyncio.Queue[Command]] = {}
         self.server: asyncio.AbstractServer | None = None
         self.last_write: dict[str, float] = {}
+        self.mqtt_sink = None  # Installed only when MQTT is configured.
 
     async def start(self) -> None:
         self.server = await asyncio.start_server(
@@ -140,17 +141,26 @@ class ControlService:
                     headers.get("x-ble-bridge-token",""), token
                 ):
                     status, body = 401, {"error":"unauthorized"}
-                elif method != "POST" or path != "/control":
+                elif method != "POST" or path not in ("/control", "/mqtt"):
                     status, body = 404, {"error":"not_found"}
                 elif not headers.get("content-type","").startswith("application/json"):
                     status, body = 415, {"error":"expected_json"}
                 else:
                     length = int(headers.get("content-length","0"))
-                    if not 0 < length <= 2048:
+                    if not 0 < length <= (16384 if path == "/mqtt" else 2048):
                         status, body = 413, {"error":"invalid_content_length"}
                     else:
                         data = await asyncio.wait_for(reader.readexactly(length), 4)
-                        status, body = await self.dispatch(json.loads(data))
+                        payload = json.loads(data)
+                        if path == "/mqtt":
+                            if self.mqtt_sink is None:
+                                status, body = 503, {"error":"mqtt_not_configured"}
+                            elif self.mqtt_sink.ingest(payload):
+                                status, body = 202, {"ok":True}
+                            else:
+                                status, body = 422, {"error":"rejected_invalid_mqtt_event"}
+                        else:
+                            status, body = await self.dispatch(payload)
         except (ValueError, json.JSONDecodeError, asyncio.IncompleteReadError,
                 asyncio.LimitOverrunError, asyncio.TimeoutError) as exc:
             status, body = 400, {"error":"bad_request"}
@@ -161,6 +171,7 @@ class ControlService:
             reason = {202:"Accepted",400:"Bad Request",401:"Unauthorized",
                       403:"Forbidden",404:"Not Found",409:"Conflict",
                       413:"Payload Too Large",415:"Unsupported Media Type",
+                      422:"Unprocessable Entity",
                       429:"Too Many Requests",500:"Internal Server Error",
                       503:"Service Unavailable",504:"Gateway Timeout"}.get(status,"Error")
             writer.write((

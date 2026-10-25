@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.16.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.0.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -623,7 +623,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.16", note="JK02_explicit_temperature_control_optin"
+        "bridge_start", version="0.2.0", note="JK02_mqtt_discovery_two_bms"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -637,10 +637,28 @@ async def main() -> None:
         LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
     cfg = options()
     if bool(cfg.get("persistent_connections", True)):
+        # Import lazily, preserving standalone BLE diagnostics/test mode.
+        from mqtt_ha import HomeAssistantMQTT
+        publisher = HomeAssistantMQTT(cfg,addresses(str(cfg.get("bms_addresses",""))),
+                                      control=CONTROL)
         await CONTROL.start()
+        CONTROL.mqtt_sink = publisher
+        publisher.start(asyncio.get_running_loop())
+        async def mqtt_watchdog() -> None:
+            while True:
+                await asyncio.sleep(10)
+                publisher.watchdog()
+        health_task = asyncio.create_task(mqtt_watchdog())
         try:
             await persistent_sessions(cfg)
         finally:
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
+            publisher.stop()
+            CONTROL.mqtt_sink = None
             await CONTROL.close()
     else:
         await forward("legacy_probe_mode", mode="short_connections")

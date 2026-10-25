@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.16. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.2.0. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.16 development milestone
+## Included in v0.2.0 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -187,3 +187,32 @@ The actual, **manual web switches** are at `http://<HOME_ASSISTANT_HOST>:1895/jk
 To enable a supervised one-time test, explicitly set `allow_temperature_control: true` in the add-on configuration and restart. It defaults to `false`. The page provides one toggle per configured BMS, plus a read-only **Relire les paramètres** button that sends the already-supported JK read requests `0x97/0x96`. **The toggle is not optimistic:** its position is confirmed only by a **CRC-valid type `0x01` settings frame** with bit `0x0002` at offset 282. Without a recent type-0x01 frame, the display shows `INCONNU` even after a command: "write sent" is NOT "setting accepted". We have not yet confirmed that both of the user's BMSs actually emit settings frames. Do not claim the test succeeded until the setting is independently verified in the JK app or from a fresh `0x01` frame. Use an external battery monitor during the test.
 
 Commands are **never triggered automatically** at startup or by dashboard refresh, and are **never published via MQTT**. No other battery registers are writable through this endpoint. Previous custom Node-RED flows are backed up and preserved.
+
+## Home Assistant MQTT Discovery — v0.2.0 (BLE JK02, 2 independent devices)
+
+This milestone publishes **two separate Home Assistant MQTT devices**, named `JK-BMS 1` and `JK-BMS 2`, from the configured BLE addresses. Unique IDs are derived from each **real MAC** and never change on restart; duplicate devices are not created when the number of the Bluetooth scanner's advertisement changes. MQTT runs inside the existing bridge, with a verified and token-protected `localhost:1896/mqtt` feed from Node-RED's native validated JK02 decoder; there is **no second exposed port**, no cloud dependency and no need for an additional Home Assistant MQTT bridge integration.
+
+In add-on options, set:
+```yaml
+bms_addresses: "C8:47:80:1A:1A:EF,C8:47:80:1A:27:12"
+persistent_connections: true
+mqtt_enabled: true
+mqtt_host: core-mosquitto
+mqtt_port: 1883
+mqtt_username: YOUR_MOSQUITTO_USERNAME
+mqtt_password: YOUR_MOSQUITTO_PASSWORD
+mqtt_topic_prefix: smart_jkbms_ble
+mqtt_discovery_prefix: homeassistant
+allow_temperature_control: false
+```
+Supply the credentials of your *existing* Mosquitto broker; do not publish them or commit them to GitHub. Discovery is retained in MQTT. All state values are published only after the source 300-byte JK02 frame passes CRC and the electrical decoder verifies 4–32 realistic cell voltages, a plausible pack voltage and cell-sum agreement, real signed current and valid SOC. The BMS1 *exact* triple -200 °C raw marker causes **temperature channels to be null/unavailable**, while the validated electrical values and 16 real cells are kept. No values are fabricated to fill unavailable fields.
+
+The devices have voltage/current/power/charge/discharge power, SOC and SOH (if present), per-cell voltage, min/max/average/delta, balance current/action, charge/discharge MOS states, remaining/nominal/cycled capacity, cycle count, total runtime, temperature sensors (T1/T2/MOS and additional channels if present), active alarm and bitmask, resistance/cable diagnostics, cell-wire warning mask and charge phase. Configuration thresholds come from a **CRC-valid type 0x01 settings frame**; firmware/hardware versions and UART/CAN protocol IDs come from a **CRC-valid type 0x03 info frame**. *Never* publish the device-info passcodes or user data. If these frames are missing, the settings and info entities show unknown rather than guessed values. All status attributes are independent for BMS1/BMS2.
+
+The Home Assistant **Désactiver surveillance thermique** switch is created on each device (register 0x28), but manual writes are disabled by default. To perform an explicit supervised RS485 diagnostic test set `allow_temperature_control: true`, restart, press the adjacent **Armer commande thermique (30 s)** button and then operate the switch. Without this one-shot arm, a switch command is rejected and no BMS write occurs. **ON disables thermal protection**; OFF enables it. The switch is *never optimistic*: its ON/OFF state is published only after the BMS sends a CRC-valid type-0x01 settings frame. If no settings frame is received, it remains **unknown**. Sending a write does NOT prove the device accepted it. Do not disable protections on a loaded or charging pack, particularly with a physically cut temperature probe. Do not create HA automations for this unsafe control. The switch is registered as configuration and all MQTT commands are rate-limited by the existing BLE ControlService.
+
+The switch **remains visible** but unavailable until `allow_temperature_control` is explicitly enabled. A per-BMS availability topic turns measurements unavailable if the bridge loses valid telemetry for 70 seconds. On reconnect the retained discovery and last validated state are republished. The MQTT broker must be reachable from the add-on and Home Assistant must already have the MQTT integration configured.
+
+Diagnostics remain accessible in Node-RED on port 1895. All user's customized Node-RED flows are preserved by `merge_flows.py` with backups and tested idempotent migrations. MQTT publishing is optional via `mqtt_enabled: false`.
+
+**Development limits**: status readings and JK02 frame interpretation remain experimental pending BatMON comparison. No measurements are to be trusted for overtemperature / short-circuit / charge safety interlocks. MQTT state availability is derived from valid decoded BLE telemetry, *not* just a connected BLE socket. Cell resistance and other supplementary frame offsets follow the documented JK02_32S layout and are not supported on arbitrary JK04 profiles. The BMS's physical protection settings must not be modified to make dashboard data look good.

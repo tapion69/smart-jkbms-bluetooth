@@ -21,7 +21,7 @@ export BLE_BRIDGE_TOKEN="$(cat /data/.ble_bridge_token)"
 
 # Merge new vendor nodes without overwriting existing user flows.
 # A backup is made whenever an update adds nodes or a link.
- /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/summary_flows.json /addon/health_flows.json /addon/short_diagnostics_flows.json /addon/raw_temperature_flows.json /addon/temperature_switch_flows.json /addon/temperature_control_flows.json
+ /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/summary_flows.json /addon/health_flows.json /addon/short_diagnostics_flows.json /addon/raw_temperature_flows.json /addon/temperature_switch_flows.json /addon/temperature_control_flows.json /addon/mqtt_flows.json
 
 # User flows are never overwritten on startup or update.
 export NODE_PATH="$(npm root -g)"
@@ -29,6 +29,7 @@ export BLE_BRIDGE_ENDPOINT="http://127.0.0.1:1895/internal/ble/events"
 export BLE_OPTIONS_FILE="$OPTIONS"
 export BLE_BMS_ADDRESSES="$(jq -r '.bms_addresses // ""' "$OPTIONS")"
 export BLE_TEMP_CONTROL_ENABLED="$(jq -r '.allow_temperature_control // false' "$OPTIONS")"
+export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
 
 NR_PID=""
 BLE_PID=""
@@ -42,7 +43,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.1.16"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.2.0"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting Node-RED and BLE diagnostics bridge"
 

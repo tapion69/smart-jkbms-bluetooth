@@ -1,5 +1,5 @@
 name: Smart JK-BMS Bluetooth (Development)
-version: "0.1.16"
+version: "0.2.0"
 slug: smart_jkbms_ble
 description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
 startup: services
@@ -27,6 +27,13 @@ options:
   read_only_requests: true
   allow_temperature_control: false
   adapter_reset_on_start: false
+  mqtt_enabled: true
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_topic_prefix: smart_jkbms_ble
+  mqtt_discovery_prefix: homeassistant
   debug_mode: true
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
@@ -39,4 +46,11 @@ schema:
   read_only_requests: bool
   allow_temperature_control: bool
   adapter_reset_on_start: bool
+  mqtt_enabled: bool
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_topic_prefix: str
+  mqtt_discovery_prefix: str
   debug_mode: bool

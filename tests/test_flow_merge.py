@@ -311,6 +311,32 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_mqtt_discovery_merge_upgrade_keeps_custom_flows(self):
+        base_dir=ROOT/"smart-jkbms-bluetooth"
+        packages=[PACKAGED,DECODER,
+           base_dir/"summary_flows.json",base_dir/"health_flows.json",
+           base_dir/"short_diagnostics_flows.json",base_dir/"raw_temperature_flows.json",
+           base_dir/"temperature_switch_flows.json",base_dir/"temperature_control_flows.json",
+           base_dir/"mqtt_flows.json"]
+        existing=[n for path in packages[:-1] for n in json.loads(path.read_text())]
+        user={"id":"user_private_flow","type":"function","name":"Owner flow",
+              "func":"return msg;","wires":[[]],"z":"b150100000000001"}
+        existing.append(user)
+        for n in existing:
+            if n["id"] in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
+                n["wires"][0]=[x for x in n["wires"][0] if x!="b200000000000002"]
+        with tempfile.TemporaryDirectory() as td:
+            file=Path(td)/"flows.json"
+            file.write_text(json.dumps(existing))
+            mod.merge(file,*packages)
+            by_id={n["id"]:n for n in json.loads(file.read_text())}
+            self.assertEqual(by_id[user["id"]],user)
+            for origin in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
+                self.assertIn("b200000000000002",by_id[origin]["wires"][0])
+            self.assertEqual(mod.merge(file,*packages),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()
