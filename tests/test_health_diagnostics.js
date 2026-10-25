@@ -6,7 +6,7 @@ const nodes = JSON.parse(fs.readFileSync(path.join(__dirname,"..","smart-jkbms-b
 const fn=nodes.find(n=>n.id==="b190021900000001");
 const timer=nodes.find(n=>n.id==="b190021900000002");
 const outDebug=nodes.find(n=>n.id==="b190021900000003");
-assert(fn&&timer&&outDebug&&outDebug.active===true);
+assert(fn&&timer&&outDebug&&outDebug.active===false,"Verbose stock Debug should be disabled since v0.1.11");
 assert.equal(timer.repeat,"20");
 const work=new Function("msg","context","node","Buffer","Date",fn.func);
 const state=new Map();
