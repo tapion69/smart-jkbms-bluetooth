@@ -1,140 +1,147 @@
-# Smart JK-BMS Bluetooth — Home Assistant add-on
+# Smart JK-BMS Bluetooth for Home Assistant
 
-**Version 0.2.8 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Development preview — v0.3.0. Testers wanted!**
 
-Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
+An experimental, community-tested Home Assistant add-on for monitoring multiple JK-BMS batteries over Bluetooth Low Energy (BLE). The add-on combines a Python/Bleak connection manager, a lightweight Node-RED frame decoder and MQTT Discovery so supported JK-BMS readings appear as native Home Assistant entities. It is **free to use**.
 
-## Architecture (current)
+> **Important:** This is a work in progress, not a stable release. JK-BMS hardware and firmware differ. Validate measurements against the official JK app and never rely on experimental software for battery safety, charge cutoffs or thermal protection.
 
-```text
-JK-BMS1, JK-BMS2
-   │ Bluetooth 0xFFE1
-   ▼
-Python BLE bridge (BlueZ/Bleak)
-   │ per-BMS BLE sessions, notifications and authenticated local HTTP
-   ▼
-Node-RED — internal transport and JK02 frame decoder (1895)
-   │ assemble 300-byte frames, verify checksum, validate measurements
-   ▼
-Python MQTT publisher (local-only HTTP 127.0.0.1:1896)
-   │ independent state, availability, HA discovery + approved commands
-   ▼
-Mosquitto → Home Assistant
-```
+## Features
 
-**Node-RED is still part of the *data pipeline***. Do not stop the Node-RED process or delete its three remaining functional flow branches. **Node-RED is not the Home Assistant dashboard** and no standalone HTML page is needed: state, diagnostics, and configuration are managed directly through the discovered MQTT devices.
+- One Home Assistant MQTT device per configured JK-BMS, identified by its stable Bluetooth address
+- Multiple independent BLE sessions, with independent reconnection for each BMS
+- Pack SOC, voltage, current, charge/discharge power, cell average/min/max/delta, cell voltages and available wire resistances
+- Cycle count, SOH, runtime, temperatures, alarm states and confirmed configuration values where the BMS actually provides them
+- Available settings exposed through native HA controls, protected by explicit authorization, validated JK02 registers and verified BMS readback
+- Fixed English entity names and stable entity identifiers across restarts and updates
+- Node-RED inside the add-on; users do not need a separately installed Node-RED add-on
 
-### Minimal Node-RED flows
+Currently tested with JK02 Bluetooth frame formats. `JK02_24S` and `JK02_32S` describe **frame layouts**, not necessarily the installed cell count. Some fields are model-dependent and should remain unavailable rather than show invented values.
 
-There are only three packaged files, with **no packaged Debug, Inject timer or obsolete HTML nodes**:
+## Installation guide
 
-- `flows.json` — authenticated internal BLE HTTP events and CRC-checked 300-byte frame assembler;
-- `decoder_flows.json` — JK02_24S / JK02_32S electrical decoder and plausibility checks;
-- `mqtt_flows.json` — forward only verified frames/measurements to Python's MQTT publisher.
+### 1. Requirements
 
-`merge_flows.py` performs an idempotent update. It removes **unmodified vendor-owned legacy** debug/HTML/inject functions via `vendor_cleanup.json` and fixes their wires, but never deletes your own nodes or a renamed / modified old function. Existing custom Node-RED content is preserved, with a dated `/data/node-red/flows.json.*.bak` backup before changes. If you have manually connected a custom node to a retired vendor node, that dependency is preserved and logged.
+- Home Assistant OS on an eligible `amd64` or `aarch64` machine
+- A working Bluetooth adapter available to Home Assistant through BlueZ (built-in or USB)
+- One or more compatible JK-BMS units with Bluetooth enabled
+- The **Mosquitto broker** add-on and the Home Assistant MQTT integration, already configured with a working MQTT login
+- Network access to GitHub for installation and updates
 
-The old `/jk-bms/temperature` HTML interface is removed. Home Assistant MQTT **Configuration** already exposes the parameter controls and the per-BMS `Allow Parameter Changes` switch.
+**Bluetooth ownership:** stop BatMON, another JK-BMS Bluetooth integration, and any mobile app actively connected to the same batteries while testing. A BLE device may only support one notification subscriber at a time. If you see `org.bluez.Error.NotPermitted: Notify acquired`, check for competing BLE readers first.
 
-## Configuration
+### 2. Find your JK-BMS Bluetooth address
 
-Add repository `https://github.com/tapion69/smart-jkbms-bluetooth` in Home Assistant → Add-ons → Add-on Store → Repositories, then install the add-on and set:
+One suitable Bluetooth LE scanner is **[nRF Connect for Mobile](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-mobile)** by Nordic Semiconductor, available for Android and iOS. You can also use a similar BLE scanner.
+
+1. Stand near the battery and turn on Bluetooth on your phone.
+2. Open nRF Connect and start a BLE scan.
+3. Identify the nearby JK-BMS advertisement (often named `JK-BMS`, `Batterie…`, or another custom battery name).
+4. On **Android**, open the device details and copy its advertised Bluetooth MAC address, such as `AA:BB:CC:DD:EE:FF`. Check the name and signal strength so you do not select a neighbour's device.
+5. Repeat for each BMS, then disconnect the phone's BLE session before starting the add-on.
+
+**iPhone/iPad note:** iOS often shows a device identifier rather than its physical Bluetooth MAC address. If you cannot see the actual MAC on iOS, use an Android BLE scanner, Linux/BlueZ or another method that exposes the device address. Do not substitute an iOS UUID for a MAC.
+
+### 3. Install the add-on
+
+1. In Home Assistant, open **Settings → Add-ons → Add-on Store**.
+2. Open the store menu and choose **Repositories**.
+3. Add `https://github.com/tapion69/smart-jkbms-bluetooth`.
+4. Find **Smart JK-BMS Bluetooth (Development)** and install it.
+5. Open **Configuration** and enter your actual BMS MAC address(es) and MQTT credentials.
+6. Save the options, start the add-on, and enable **Start on boot** if you want continuous monitoring.
+7. Check the add-on logs for successful Bluetooth connections and `MQTT broker connected`.
+8. Open **Settings → Devices & services → MQTT → Devices**. Each configured BMS should be visible as its own device.
+
+There is **no need** to install the bundled Node-RED flows by hand. The add-on installs and upgrades its own internal flows while preserving user-modified flows and making backups during migrations.
+
+### 4. Example configuration
 
 ```yaml
-bms_addresses: "C8:47:80:1A:1A:EF,C8:47:80:1A:27:12"
+bluetooth_adapter: auto
+bms_addresses: "AA:BB:CC:DD:EE:FF,11:22:33:44:55:66"
 persistent_connections: true
-read_only_requests: true
+scan_duration_seconds: 8
+scan_interval_seconds: 45
 mqtt_enabled: true
 mqtt_host: core-mosquitto
 mqtt_port: 1883
-mqtt_username: "<mosquitto-user>"
-mqtt_password: "<mosquitto-password>"
-mqtt_discovery_prefix: homeassistant
-mqtt_topic_prefix: smart_jkbms_ble
-allow_temperature_control: false
+mqtt_username: "your-mqtt-username"
+mqtt_password: "your-mqtt-password"
+allow_parameter_changes: false
+send_bip: false
 ```
 
-Replace MAC addresses and MQTT credentials with your own. Never publish private passwords. Open Home Assistant → Settings → Devices & services → MQTT → Devices to see your BMS. Node-RED developer editor (if needed) is on port 1895 and has its own authentication.
+Replace example MAC addresses and MQTT credentials with your own. Never share passwords, full configuration backups, internal IDs or private logs in public bug reports.
 
-## Home Assistant organization
+### 5. What the configuration options mean
 
-**Measurements** — voltage, signed current, power, charging/discharging power, SOC, remaining capacity, balancing, cell 1–16 voltage, min/max/average and delta, and available temperature probes. Cell voltages and delta are shown with **3 decimals**, battery voltage with **2 decimals**, delta in **V**.
+| Option | Description |
+|---|---|
+| `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3` controller. |
+| `bms_addresses` | Comma-separated JK-BMS Bluetooth MAC addresses. Each address identifies one BMS. |
+| `persistent_connections` | Recommended `true`: keep independent long-running BLE sessions. |
+| `scan_interval_seconds` | Interval used by the connection manager to retry finding missing batteries. |
+| `scan_duration_seconds` | How long a BLE advertisement scan runs. |
+| `scan_all_devices` | Troubleshooting option to show non-JK nearby BLE advertisements. Usually `false`. |
+| `connection_probe_seconds` | Duration of short connection probes when persistent sessions are disabled. |
+| `adapter_reset_on_start` | **Leave `false`** unless diagnosing a specific adapter. Can disconnect all Bluetooth devices sharing it. |
+| `mqtt_enabled` | Enable automatic Home Assistant MQTT Discovery and states. |
+| `mqtt_host`, `mqtt_port` | Usually `core-mosquitto` and `1883`. |
+| `mqtt_username`, `mqtt_password` | Credentials for your Mosquitto broker. |
+| `mqtt_topic_prefix` | Advanced MQTT namespace; keep the default unless you understand migrations. |
+| `mqtt_discovery_prefix` | Usually `homeassistant`. |
+| `allow_parameter_changes` | Master safety switch for writing BMS settings. **Default: `false`**. |
+| `debug_mode` | Optional development diagnostics. |
+| `send_bip` | Reserved for optional anonymous installation-count telemetry. **Not operational in this preview; leave `false`.** |
 
-**Configuration** — one `number` or `switch` per allowlisted JK02 setting, **not** a second read-only sensor showing the same setting. `Autoriser modification paramètres` is OFF by default and resets to OFF on reconnect. The add-on-wide option `allow_temperature_control: true` must also be explicitly enabled before manual writes. A setting change is not reported as accepted until the BMS sends verified type-0x01 configuration readback; writes require fresh telemetry and config state.
+The former `allow_temperature_control` name was misleading: it controlled all JK02 parameter writes, not only temperature. The master write option has been renamed to `allow_parameter_changes`. JK02 read-only information and settings requests remain necessary for monitoring and readback and are performed automatically.
 
-**Diagnostics** — useful values only: cell resistances, cell min/max index, cycle count/cycled capacity, SOH, remaining protection release timers, power-on count, supported firmware/hardware/identity fields, DRY1/DRY2 contacts, charging/heating state, readable alarms, emergency countdown and online status. No hex bitmask entities, raw numeric protocol/trigger IDs, redundant battery nominal capacity, redundant cell count, extra raw balancing/status codes or repeated runtime copies.
+### 6. Viewing measurements and changing settings
 
-Obsolete MQTT Discovery announcements are **actively deleted from the broker on reconnection** for each configured BMS; their stable device identity and surviving sensors are preserved. This updates the integration, not old manually created Lovelace YAML cards that explicitly reference removed entity IDs.
+The MQTT device page offers the native Home Assistant categories:
 
-### Accuracy and protections
+- **Sensors:** SOC, total voltage (two decimals), power/current, cell voltages, corresponding resistances, temperatures, cycles, SOH, capacities and other available readings.
+- **Diagnostic:** BMS identity, connection status, alarms and confirmed read-only switch states.
+- **Configuration:** editable supported parameters and the `Allow Parameter Changes` switch.
 
-The bridge only publishes validated electrical telemetry. A JK02 frame with exactly -200.0 °C in all three standard probes may still provide valid electrical data, but these missing temperatures remain unavailable in HA. Never use this experimental integration as a replacement for hardware battery or thermal protection.
+To change a BMS setting, intentionally enable `allow_parameter_changes: true` in the add-on options, then turn **Allow Parameter Changes** ON **for that individual BMS** in Home Assistant. No command is sent unless its register and range are allowlisted, recent valid telemetry and confirmed settings are available, and a readback can verify the value. Revoke the switch after editing. It resets to OFF following reconnect or restart. Do not disable protection settings for testing purposes.
 
-Current source references: [syssi JK-BMS BLE protocol documentation](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md) and [JK-BMS BLE decoder](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp).
+Read-only JK02 `0x96` and `0x97` queries are necessary to retrieve and verify parameters; they are not user-adjustable settings.
 
-## Updates and test policy
+## Diagnostics and known limitations
 
-Source and GitHub Actions cover JK02 framing, electrical validation, two-BMS MQTT discovery, parameter write safety, obsolete entity cleanup, and non-destructive Node-RED migration. Tests run without real batteries; verify newly supported measurements against the official JK application or BatMON before relying on them.
+- **Connected but no readings:** verify no other Bluetooth application, BatMON instance or BLE add-on currently holds the BMS notification characteristic.
+- **MQTT device missing:** verify Mosquitto credentials and the MQTT integration; check `MQTT broker connected` in the logs.
+- **Unknown parameters:** the model may not have sent a valid JK02 settings frame yet. Values are intentionally not fabricated.
+- **Temperature unavailable:** disconnected or faulty probes can report invalid readings (such as `-200 °C`). These are treated as unavailable.
+- **Display precision:** Home Assistant per-entity display overrides can take precedence over the add-on's suggested precision.
+- **Compatibility:** support varies by JK hardware/firmware and BLE frame layout. Report both positive tests and failures.
 
-For problems, check the add-on log for `MQTT broker connected`, `MQTT Discovery published`, and `Node-RED cleanup` messages before enabling any debugging.
+### Reporting test results
 
-## v0.2.5 — Native HA presentation and runtime fix
+When reporting an issue, please include the add-on version, Home Assistant version, JK-BMS hardware and firmware versions (if known), symptoms and **sanitized** logs or screenshots. Remove MAC addresses, serial numbers, passwords, tokens and private network information before publishing.
 
-**Root cause found:** earlier add-on updates kept the *old* stock Node-RED MQTT forwarding function `b200000000000002`, because `merge_flows.py` upgraded only decoder functions. Consequently, the running MQTT publisher never saw newly introduced fields such as uptime. The v0.2.5 migration recognizes **exact published vendor fingerprints** from 0.2.0/0.2.1/0.2.3/0.2.4 and updates only these unmodified functions, backing up the existing flow. Owner-edited / renamed Functions are **never overwritten**. Test fixtures contain the exact prior published versions. For custom code, a warning is logged and review remains necessary.
+## Development, installation counting and privacy
 
-**Uptime is now independently derived in Python** from a CRC-valid type-0x02 JK02 frame, matched to a verified per-BMS electrical result using the frame counter; for JK02_32S the u32 little-endian seconds count is at byte offset **194**, and for JK02_24S at **162** (as independently decoded by syssi and BatMON). This avoids depending on JavaScript cached supplemental fields. The single human-readable `Total_runtime` entity uses the established `total_runtime_formatted` unique ID. Example: 53293405 seconds -> `616j 19h 43m`. No duplicate raw uptime sensor is registered.
+This project is in active development. We are preparing an **optional** installation heartbeat (BIP), similar to the Smart Voltronic and Smart Energy Finance projects, to understand how many installs are actively testing new versions. The send mechanism and collection endpoint are **not yet verified for this module**, so `send_bip` is intentionally disabled for the public preview. No battery SOC, MAC address, serial number, MQTT password or precise location should be included in such a heartbeat. A future release must document the exact fields, destination, cadence and opt-out control before enabling network telemetry.
 
-**Better native HA organization:** charging cycles (`Nombre_Cycle`), accumulated cycle capacity and SOH are ordinary measured sensors, not hidden in the Diagnostic category. For each cell, voltage and wire resistance now use the **same primary measured-sensor category** and adjacent sortable names: `Cellule 01 - 1 Tension`, `Cellule 01 - 2 Résistance`; then cell 02, etc. Their original MAC-based unique IDs are preserved so histories are not lost. Note that Home Assistant's built-in device page ultimately controls sorting; a custom Lovelace card can provide stricter two-row-per-cell layout if needed.
+## Support this free project
 
-**No phantom diagnostics:** optional information from the 0x03 device-info frame and optional extended diagnostics is now advertised only after a genuine non-null value has actually arrived. Old retained MQTT discovery is tombstoned before republishing each BMS's active supported entities, and **all legacy sensor announcements for parameters that already have Configuration number/switch entities** are deleted. Unknown is still correct for parameters that have never been received as CRC-valid settings (type 0x01); it cannot be fixed safely by copying another unrelated measurement.
+Smart JK-BMS Bluetooth is free, but Bluetooth reverse-engineering, compatibility testing, maintenance and answering bug reports take considerable time.
 
-These are deliberately presentation and data-reliability changes. No change is made to BLE sessions, thermal protections or register write safety.
+If this project helps you, a small **[Ko-fi](https://ko-fi.com/tapion69)** would be greatly appreciated. Contributions are voluntary and help keep development moving. Thank you to everyone testing, reporting issues and helping improve compatibility!
 
-**Protocol comparisons:** [syssi BLE JK02_32S frame offsets](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md), [BatMON JK BLE decoder](https://github.com/fl4p/batmon-ha/blob/master/bmslib/models/jikong.py). Verified against simulated 24S/32S type-0x02 packets with 300-byte checksum, MQTT data flow, discovery, and previous released forwarding functions.
+**Project repository:** https://github.com/tapion69/smart-jkbms-bluetooth
 
-**After upgrading:** restart the add-on, allow the current MQTT discovery to refresh, and review both devices. No manual deletion of MQTT devices is necessary. The old entity labels may persist if Home Assistant was customized by the owner; the entity's display name can be reset in its settings.
+## Technical overview
 
-## v0.2.6 — Fix parameter switches reverting to their previous state
+```text
+JK-BMS (BLE) → Python/Bleak → authenticated local Node-RED frame assembler
+             → JK02 CRC/validation → local Python MQTT publisher
+             → Mosquitto → Home Assistant MQTT Discovery
+```
 
-A real Home Assistant failure was captured on 25 October 2026 while trying to switch **BMS balance** off: `Refus : paramètres BMS non confirmés (trame 0x01 absente)`. The BMS and 0x02 measurements stayed online, but changes were correctly rejected because the add-on had not received **current, checksum-validated settings**. Previously the BLE bridge sent 0x96 mostly at initial connection, yet the command gate considered settings stale after three minutes. This could prevent every parameter write for long-running sessions.
+Node-RED is an internal part of the add-on's data pipeline (development editor on port `1895`), not a separate required Home Assistant installation. Existing MAC-based entity IDs and MQTT discovery topics are retained during normal upgrades. A changed Bluetooth MAC or discovery prefix can create a new Home Assistant device.
 
-**Fixed without bypassing the safety guard:**
-
-- Python BLE bridge now gently requests a **read-only 0x96 settings update every 120 seconds**, separately on each persistent BMS BLE session, with no reconnect and no change to the electrical frame decoder.
-- If a user adjusts a parameter while no fresh verified type-0x01 settings frame exists, the MQTT command handler **requests a fresh 0x96 reading automatically, then waits up to 8 seconds** for a 300-byte frame with a valid header, type, CRC and plausible JK02_32S settings values.
-- **A write is sent only after that confirmation**, provided that explicit Home Assistant `Autoriser modification paramètres` remains ON, the add-on write option remains enabled, the telemetry is fresh, the setting appears in a verified configuration frame, and the requested value is on the strict register allowlist.
-- An additional **readback after writing** determines whether the BMS actually applied the requested value. HA continues showing the verified BMS state: **no optimistic ON/OFF animation** or invented settings.
-- If the BMS still does not transmit an accepted 0x01 frame, **no command is sent**. A diagnostic entity displays a specific reason: no frame received, invalid/unsupported frame, read-only requests disabled, BLE unavailable or post-write readback absent. It never disables BMS protection or writes around the fault.
-- A per-BMS pending-command lock prevents repeated clicks from queuing multiple writes. The 15-second BLE write cooldown remains intact. Disconnection clears old settings confirmation.
-- Existing MQTT device IDs, user Node-RED flows, cell formatting, settings ranges and thermal safeguards remain unchanged.
-
-**To test:** Update to v0.2.6, ensure `read_only_requests: true` and `persistent_connections: true`, and restart. After the BMS is online, enable `allow_temperature_control: true` only if you intentionally want to modify BMS settings, then turn on the per-BMS HA switch `Autoriser modification paramètres`. When you manually change `BMS balance switch`, check the diagnostic entity `Dernière commande paramètres` for `Lecture des paramètres BMS (0x96)`, `Confirmé par le BMS` or a precise refusal. Do not repeatedly click or disable important BMS protections to make a test pass.
-
-**Still to verify on the actual hardware:** whether the target BMS returns a valid type-0x01 settings packet in response to 0x96 (protocol and firmware vary). A successful CI test only verifies the software safety logic and synthetic 0x01 responses.
-
-## v0.2.7 — Fixed English MQTT entity names, organized native HA sections
-
-All **MQTT entity names** are now defined in a centralized English catalog (`ble/presentation.py`). They are stable across installations, languages and BLE device-advertised names. The **MAC-derived device and entity `unique_id` values and MQTT topics are unchanged**; existing automations and history should remain linked to the same entities. The two device labels `JK-BMS 1` and `JK-BMS 2` are assigned by sorting configured MAC addresses rather than trusting the user's configuration list order. For a different set of BMS addresses, labels can of course differ. Home Assistant registry overrides for manually renamed entities take precedence over new MQTT Discovery defaults.
-
-**Native Home Assistant sections:** MQTT Discovery supports **Sensors**, **Diagnostic**, and **Configuration**, not arbitrary renamed/reordered tabs. Exact custom tabs named "Info", "Sensors", "Parameters" require a separate Lovelace dashboard; this version intentionally does not add a redundant HTML UI or dashboard. Within Home Assistant's native page, information and all read-only switch statuses are assigned to **Diagnostic**; electrical measurements and cell pairs to the primary **Sensors** section; writable settings, including `Allow Parameter Changes`, remain in **Configuration**. A stable numeric prefix on English display labels guides alphabetical ordering, although Home Assistant ultimately controls layout.
-
-**Diagnostic (information and switch statuses):** Online, battery type, software/hardware version, hardware serial, BMS name, manufacture date, BMS alarm active/list and model. Physical states include charge/discharge MOS, precharge, heater, charger, DRY1/DRY2, emergency, balancing, PCL and UART2 when available. Ten documented parameter switches additionally expose their **BMS-confirmed ON/OFF state** as read-only `binary_sensor` entities (`status_<parameter_key>`) in Diagnostic, with distinct IDs from the editable controls in Configuration. These status entities are created only once a checksum-validated type-0x01 settings frame actually supplies the values. Unknown/unsupported optional data is not fabricated.
-
-**Primary sensors (fixed order by label):** 01 SOC, 02 Total Voltage (**2 decimals**), 03 Total Power, 04 Total Current, 05 Charge Power, 06 Discharge Power, 07 Average Cell Voltage, 08 Cell Voltage Delta, 09 Min Cell Voltage, 10 Min Cell Number, 11 Max Cell Voltage, 12 Max Cell Number, 13 Balance Current, then temperature probes T1/T2/MOS/T3/T4/T5, then 16 (or configured number of active) cell voltage/resistance pairs. The native labels follow `20 Cell 01 - 1 Voltage`, `20 Cell 01 - 2 Resistance`, etc., with each voltage and resistance displayed to **3 decimal places**. Other sensors (cycle count, SOH, capacities, runtime, recovery countdowns, etc.) follow those pairs.
-
-**Configuration:** All existing documented and range-checked MQTT `number`/`switch` entities keep their original English names and command topics. The per-BMS permission control is renamed `Allow Parameter Changes`. Verified 0x96 / 0x01 readback, authorization, BLE command throttling and non-optimistic write safety are unchanged.
-
-An old `uart2_enabled` *sensor* discovery topic is explicitly tombstoned before the same state becomes a proper read-only **binary sensor**. All other existing entity IDs keep their MQTT Discovery identifiers. No device deletion is necessary.
-
-**Limits:** MQTT Discovery cannot forcibly override entity names manually customized in Home Assistant's Entity Registry, nor can it force an exact visual order of native cards. Settings for an unavailable BMS remain unknown until a verified settings frame is received. User data, BLE passwords, HEX flags and raw diagnostic fields are not published.
-
-## v0.2.8 — Clean MQTT labels and adjacent cell pairs
-
-- Removed artificial leading numbers from all information, status and measurement display labels; English names remain fixed and MAC-based MQTT unique IDs and entity IDs are unchanged.
-- In the Sensors group, `Min Cell Voltage` sorts immediately before `Min Cell Voltage - Cell Number`, and the Max pair follows the same convention.
-- Individual readings use `Cell 01 Voltage` followed by `Cell 01 Voltage - Resistance`, then the next cell. Cell voltage and resistance retain their 3-decimal display precision.
-- Total Voltage is formatted to two decimal digits in the MQTT numeric value template, with suggested display precision 2. Home Assistant user-defined per-entity precision overrides the integration suggestion: if the device page still shows `51,0 V`, open that entity's Settings and change its display precision to 2 (or reset the override). The underlying telemetry and history remain numeric and unchanged.
-- Cycles and SOH remain ordinary Sensors; editable parameters, confirmed switch-state diagnostics, BLE decoding, protective write checks and per-BMS identifiers are untouched.
-- Home Assistant decides the native entity-list order; MQTT Discovery cannot enforce an arbitrary overall order without artificial sort prefixes. Use a Lovelace Entities card for an exact custom sequence.
-
-After upgrading, restart the add-on so retained MQTT Discovery labels refresh. Manually overridden HA names may require a reset to the integration-provided name; no entity deletion should be required.
+The source is experimental. Always keep firmware safety protections active and independently supervise your battery system.
