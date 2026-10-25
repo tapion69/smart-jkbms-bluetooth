@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.9. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.10. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.9 development milestone
+## Included in v0.1.10 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -125,3 +125,11 @@ Operational state is available as Node-RED events: `session_persistent`, `stream
 If the BLE logs show that a BMS is connected but **only another battery appears in the 10-second measurements**, this release differentiates four independent stages for each MAC address: Bluetooth connected, JK02 type-0x02 frame assembled with valid CRC, JK02_24S/JK02_32S layout plausibility check, and finally a decoded record. The **ÉTAT BMS 1 + BMS 2 (20 s)** Debug in **JK-BMS | Mesures** displays one text line per BMS every 20 seconds. It reports specific failures (cell bitmask, cell voltage, sum-of-cells versus pack voltage, invalid SOC, unexpected temperature), without flooding the Debug sidebar or exposing full HEX automatically.
 
 There is **no automatic relaxation** of validation for a failing BMS, no MQTT publication of rejected measurements, and **no change to Bluetooth or polling behavior** from 0.1.8. The three feed connections (Bluetooth lifecycle events, verified JK02 frames and successful decoder output) are appended non-destructively to existing user flows with a timestamped backup. Original Debug nodes remain off by default, but can be enabled manually. To diagnose a rejected battery, send the `ÉTAT BMS 1 + BMS 2 (20 s)` lines; if required, temporarily enable the full HEX Debug for one frame only.
+
+## BlueZ cached-connection recovery (v0.1.10)
+
+**Symptoms:** after restarting the add-on, zero configured JK-BMS advertisements are found although BlueZ sees other BLE devices. Linux BlueZ can retain a device as connected after a program closes or crashes, and a connected BMS may stop advertising. Bleak may then fail to rediscover it by scanning even while the existing BlueZ GATT object remains available. [Bleak Linux backend](https://bleak.readthedocs.io/en/latest/_modules/bleak/backends/bluezdbus/client.html) documents the already-connected workaround.
+
+**Behavior:** the persistent session manager now queries BlueZ `org.freedesktop.DBus.ObjectManager.GetManagedObjects` for **only the MAC addresses explicitly configured**. It accepts only `org.bluez.Device1` objects whose `Connected` flag is true, and only on the selected Bluetooth adapter (`hci0`, etc.). If a configured BMS is still connected in BlueZ, the bridge creates a native `BLEDevice` from that existing BlueZ object path, then opens a normal read-only Bleak session using the cached GATT connection **without requiring a fresh BLE advertisement**. Other devices are never touched. If the BMS is not connected according to BlueZ, the manager continues normal BLE discovery and the startup recovery scans. Errors reading BlueZ's object manager simply fall back to ordinary BLE scans.
+
+Events: `bluez_connected_recovered`, `bluez_connected_not_found`, or `bluez_cache_unavailable` explain which path was used. **No automatic controller power cycles, forced disconnections, unpairing, or host Bluetooth service restarts** are performed. The optional `adapter_reset_on_start` setting must remain **false** for normal use. These changes are specifically for the startup/restart edge case; they do not make a disconnected non-advertising BMS connectable, nor can they override an active smartphone/BatMON Bluetooth connection. BMS commands stay read-only and no unverified MQTT telemetry is published.

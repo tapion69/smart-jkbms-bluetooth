@@ -182,7 +182,8 @@ class BleTests(unittest.TestCase):
 
         async def scenario():
             with patch.object(bridge,"scan",scan), patch.object(
-                bridge,"probe",hold
+                bridge,"find_bluez_connected",AsyncMock(return_value={})
+            ), patch.object(bridge,"probe",hold
             ), patch.object(bridge,"forward",forward), patch.object(
                 bridge,"options",lambda:{"bms_addresses":a+","+b,"scan_interval_seconds":45}
             ):
@@ -205,7 +206,8 @@ class BleTests(unittest.TestCase):
             started.append(address)
             await asyncio.Event().wait()
         with patch.object(bridge,"scan",AsyncMock(return_value={b:object()})), patch.object(
-            bridge,"probe",hold
+            bridge,"find_bluez_connected",AsyncMock(return_value={})
+        ), patch.object(bridge,"probe",hold
         ),patch.object(bridge,"recover_missing_devices",AsyncMock(return_value={b:object()})),patch.object(
             bridge,"forward",AsyncMock(return_value=True)
         ),patch.object(bridge,"options",lambda:{"bms_addresses":a+","+b}):
@@ -213,6 +215,48 @@ class BleTests(unittest.TestCase):
                 asyncio.run(asyncio.wait_for(bridge.persistent_sessions({}),timeout=1.2))
         self.assertIn(b,started)
         self.assertNotIn(a,started)
+
+
+
+    def test_bluez_only_reuses_configured_connected_devices(self):
+        a, b="C8:47:80:1A:1A:EF","C8:47:80:1A:27:12"
+        unknown="AA:BB:CC:DD:EE:FF"
+        def obj(mac,connected):
+            return {"org.bluez.Device1":{
+                "Address":SimpleNamespace(value=mac),
+                "Connected":SimpleNamespace(value=connected),
+                "Name":SimpleNamespace(value="JK-BMS")
+            }}
+        managed={
+            "/org/bluez/hci0/dev_C8_47_80_1A_1A_EF":obj(a,True),
+            "/org/bluez/hci0/dev_C8_47_80_1A_27_12":obj(b,False),
+            "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF":obj(unknown,True),
+            "/org/bluez/hci1/dev_C8_47_80_1A_1A_EF":obj(a,True),
+        }
+        selected=bridge.bluez_cached_connected(managed,"hci0",[a,b])
+        self.assertEqual(list(selected),[a])
+        self.assertEqual(selected[a].details["path"],
+                         "/org/bluez/hci0/dev_C8_47_80_1A_1A_EF")
+        self.assertTrue(selected[a].details["props"]["Connected"])
+        self.assertEqual(bridge.bluez_cached_connected(managed,"hci1",[b]),{})
+
+    def test_bluez_connected_cache_skips_advertising_scan_for_both(self):
+        a, b="C8:47:80:1A:1A:EF","C8:47:80:1A:27:12"
+        cached={a:object(),b:object()}
+        scan=AsyncMock(return_value={})
+        found=[]
+        async def probe(address,cfg,device,*,persistent):
+            found.append(address)
+            await asyncio.Event().wait()
+        with patch.object(bridge,"find_bluez_connected",AsyncMock(return_value=cached)),patch.object(
+            bridge,"scan",scan
+        ),patch.object(bridge,"probe",probe),patch.object(
+            bridge,"forward",AsyncMock(return_value=True)
+        ),patch.object(bridge,"options",lambda:{"bms_addresses":a+","+b}):
+            with self.assertRaises(asyncio.TimeoutError):
+                asyncio.run(asyncio.wait_for(bridge.persistent_sessions({}),timeout=1.5))
+        self.assertEqual(set(found),{a,b})
+        scan.assert_not_awaited()
 
 
 if __name__ == "__main__":

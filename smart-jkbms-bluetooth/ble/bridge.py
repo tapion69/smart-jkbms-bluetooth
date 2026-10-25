@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.8.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.10.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -406,6 +406,90 @@ async def poll_cycle(cfg: dict[str, Any], *, startup: bool) -> None:
 
 
 
+
+def bluez_cached_connected(
+    managed: dict[str, Any], adapter: str, wanted: list[str]
+) -> dict[str, BLEDevice]:
+    """Use only already-connected BMS objects known by BlueZ.
+
+    After an add-on restart, a BMS connected in BlueZ may not advertise.
+    This does not disconnect, pair, or remove any Bluetooth device.
+    """
+    matches: dict[str, BLEDevice] = {}
+    selected = set(wanted)
+    for path, interfaces in managed.items():
+        if not isinstance(path, str) or not path.startswith("/org/bluez/hci"):
+            continue
+        parts = path.split("/")
+        if len(parts) != 5 or not parts[4].startswith("dev_"):
+            continue
+        controller = parts[3]
+        if adapter != "auto" and controller != adapter:
+            continue
+        props_map = interfaces.get("org.bluez.Device1", {})
+        # dbus-fast ObjectManager properties contain D-Bus Variant values.
+        props = {k: getattr(v, "value", v) for k, v in props_map.items()}
+        address = str(props.get("Address", "")).upper()
+        if address not in selected or not props.get("Connected", False):
+            continue
+        name = str(props.get("Name") or props.get("Alias") or "JK-BMS")
+        matches[address] = BLEDevice(
+            address, name, {"path": path, "props": props}
+        )
+    return matches
+
+
+async def find_bluez_connected(
+    cfg: dict[str, Any], wanted: list[str]
+) -> dict[str, BLEDevice]:
+    if not wanted:
+        return {}
+    adapter = str(cfg.get("bluetooth_adapter", "auto"))
+    bus = None
+    try:
+        from dbus_fast import BusType
+        from dbus_fast.aio import MessageBus
+        bus = await asyncio.wait_for(
+            MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=5
+        )
+        introspection = await asyncio.wait_for(
+            bus.introspect("org.bluez", "/"), timeout=5
+        )
+        proxy = bus.get_proxy_object("org.bluez", "/", introspection)
+        manager = proxy.get_interface("org.freedesktop.DBus.ObjectManager")
+        objects = await asyncio.wait_for(
+            manager.call_get_managed_objects(), timeout=8
+        )
+        matched = bluez_cached_connected(objects, adapter, wanted)
+        for address in wanted:
+            if address in matched:
+                await forward(
+                    "bluez_connected_recovered",
+                    address=address,
+                    adapter=adapter,
+                    name=matched[address].name,
+                    note="Reuse existing BlueZ GATT connection without advertisement",
+                )
+        if not matched:
+            await forward(
+                "bluez_connected_not_found",
+                adapter=adapter, missing_addresses=wanted,
+                note="No configured BMS marked Connected in BlueZ cache",
+            )
+        return matched
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        await forward(
+            "bluez_cache_unavailable", adapter=adapter,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return {}
+    finally:
+        if bus is not None:
+            bus.disconnect()
+
+
 async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
     """One long-running BLE session per configured BMS; independent reconnection.
 
@@ -445,7 +529,13 @@ async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
             missing = [mac for mac in configured if mac not in workers]
             eligible = [mac for mac in missing if now >= retry_at.get(mac, 0.0)]
             if now >= next_scan and (eligible or not configured):
-                found = await scan(cfg)
+                # A BlueZ connection surviving an add-on restart may prevent
+                # the BMS from advertising. Try its existing BlueZ GATT object
+                # before trying further BLE advertising scans.
+                cached = await find_bluez_connected(cfg, eligible)
+                need_scan = [a for a in eligible if a not in cached]
+                found = await scan(cfg) if (need_scan or not configured) else {}
+                found.update(cached)
                 # Start healthy discovered batteries immediately, without waiting
                 # for extra scans aimed at a missing battery.
                 for mac in eligible:
@@ -497,7 +587,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.8", note="JK02_read_only_independent_BLE_sessions"
+        "bridge_start", version="0.1.10", note="JK02_persistent_sessions_BlueZ_cache_recovery"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
