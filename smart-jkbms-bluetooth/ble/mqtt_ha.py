@@ -505,7 +505,7 @@ class HomeAssistantMQTT:
 
     def discover(self,mac:str,cells:int=16)->None:
         root=self.base(mac)
-        readable={key for key,value in self.full_state(mac).items() if value is not None}
+        readable={key for key,val in self.full_state(mac).items() if val is not None}
         known=self.discovered_readable.setdefault(mac,set())
         names={
           "voltage_v":"Tension_Totale_volt","current_a":"Courant_total",
@@ -581,8 +581,8 @@ class HomeAssistantMQTT:
             })
             known.add(key)
         for i in range(1,cells+1):
-            # Same main HA category and sortable names keep each resistance
-            # visually next to its own cell voltage on the native device page.
+            # The native HA list groups identical cell numbers together;
+            # both readings are in the Measurements category.
             self._component(mac,f"cell_{i:02d}_v","sensor",f"Cellule {i:02d} - 1 Tension",{
                 "state_topic":root+"/state",
                 "value_template":"{{ value_json.get('cell_%02d_v') }}"%i,
@@ -623,7 +623,20 @@ class HomeAssistantMQTT:
             self._component(mac,p.key,p.kind,p.label,options)
         self._component(mac,"write_permission","switch",
             "Autoriser modification paramètres",{
-                "state_t    def rediscover(self)->None:
+                "state_topic":root+"/write_permission/state",
+                "command_topic":root+"/write_permission/set",
+                "payload_on":"ON","payload_off":"OFF",
+                "optimistic":False,"retain":False,
+                "availability_topic":root+"/availability",
+                "entity_category":"config","icon":"mdi:lock-open-variant"
+            })
+        self._component(mac,"command_status","sensor","Dernière commande paramètres",{
+            "state_topic":root+"/command_status","entity_category":"diagnostic",
+            "availability_topic":root+"/availability"
+        })
+        self.discovered_cells[mac]=max(self.discovered_cells.get(mac,0),cells)
+
+    def rediscover(self)->None:
         for mac in self.addresses:
             identity=short_id(mac)
             # Remove stale optional discoveries from previous versions. Publish
