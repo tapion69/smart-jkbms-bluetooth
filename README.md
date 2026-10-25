@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Version 0.2.9 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Version 0.2.8 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
 Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
@@ -138,13 +138,3 @@ An old `uart2_enabled` *sensor* discovery topic is explicitly tombstoned before 
 - Home Assistant decides the native entity-list order; MQTT Discovery cannot enforce an arbitrary overall order without artificial sort prefixes. Use a Lovelace Entities card for an exact custom sequence.
 
 After upgrading, restart the add-on so retained MQTT Discovery labels refresh. Manually overridden HA names may require a reset to the integration-provided name; no entity deletion should be required.
-
-## v0.2.9 — Respect BlueZ FFE1 notification ownership
-
-BlueZ may show a JK-BMS as `Connected` while another local process owns its FFE1 notifications via `AcquireNotify`. In that state Bleak's `StartNotify` fails with `org.bluez.Error.NotPermitted: Notify acquired`; a BLE connection alone does not mean telemetry can be received.
-
-The bridge checks the BlueZ `GattCharacteristic1.NotifyAcquired` property for known already-connected BMS devices before attaching. When held, it reports a `notification_reserved` event and defers attempts by 60 seconds; it **does not disconnect the shared connection, reset the Bluetooth adapter, or send BMS writes**. If an acquisition happens between the check and `StartNotify`, the exception is classified separately rather than printed as an uninformative repeated traceback.
-
-**Important:** this does not steal or release another program's BLE notification reservation. To restore readings, stop the other Bluetooth integration/add-on/process subscribing to the same JK-BMS on the Home Assistant host, then let the add-on retry. If the reservation remains after stopping all readers, first stop this add-on and inspect the host Bluetooth state before considering an intentional adapter restart (which disrupts other Bluetooth devices).
-
-Both batteries have independent sessions. MQTT Discovery entity identities, validated telemetry, read-only requests, all BMS parameter write protections and previous native Home Assistant display changes remain unchanged.
