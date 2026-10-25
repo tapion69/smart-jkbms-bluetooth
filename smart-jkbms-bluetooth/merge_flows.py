@@ -49,6 +49,9 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         ("136f1472850339d1", "b190021900000001"),
         ("65ad8ac512b5e001", "b190021900000001"),
         ("b150100000000004", "b190021900000001"),
+        ("136f1472850339d1", "b111a90000000002"),
+        ("65ad8ac512b5e001", "b111a90000000002"),
+        ("b150100000000004", "b111a90000000002"),
     )
     packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
     for source_id, target_id in links:
@@ -76,6 +79,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         "8d30a20107f452b3": "Trames rejetées (CRC)",
         "b150100000000006": "Mesures batterie (à confirmer)",
         "b150100000000007": "Profil inconnu : raw_hex à envoyer",
+        "b190021900000003": "ÉTAT BMS 1 + BMS 2 (20 s)",
     }
     disabled = 0
     for node_id, expected_name in noisy_defaults.items():

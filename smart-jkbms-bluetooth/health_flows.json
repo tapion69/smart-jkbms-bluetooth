@@ -58,7 +58,7 @@
     "type": "debug",
     "z": "b150100000000001",
     "name": "ÉTAT BMS 1 + BMS 2 (20 s)",
-    "active": true,
+    "active": false,
     "tosidebar": true,
     "console": false,
     "tostatus": false,

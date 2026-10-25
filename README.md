@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.10. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.11. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.10 development milestone
+## Included in v0.1.11 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -133,3 +133,11 @@ There is **no automatic relaxation** of validation for a failing BMS, no MQTT pu
 **Behavior:** the persistent session manager now queries BlueZ `org.freedesktop.DBus.ObjectManager.GetManagedObjects` for **only the MAC addresses explicitly configured**. It accepts only `org.bluez.Device1` objects whose `Connected` flag is true, and only on the selected Bluetooth adapter (`hci0`, etc.). If a configured BMS is still connected in BlueZ, the bridge creates a native `BLEDevice` from that existing BlueZ object path, then opens a normal read-only Bleak session using the cached GATT connection **without requiring a fresh BLE advertisement**. Other devices are never touched. If the BMS is not connected according to BlueZ, the manager continues normal BLE discovery and the startup recovery scans. Errors reading BlueZ's object manager simply fall back to ordinary BLE scans.
 
 Events: `bluez_connected_recovered`, `bluez_connected_not_found`, or `bluez_cache_unavailable` explain which path was used. **No automatic controller power cycles, forced disconnections, unpairing, or host Bluetooth service restarts** are performed. The optional `adapter_reset_on_start` setting must remain **false** for normal use. These changes are specifically for the startup/restart edge case; they do not make a disconnected non-advertising BMS connectable, nor can they override an active smartphone/BatMON Bluetooth connection. BMS commands stay read-only and no unverified MQTT telemetry is published.
+
+## Compact per-BMS decoder rejection reasons (v0.1.11)
+
+The old verbose **ÉTAT BMS 1 + BMS 2 (20 s)** Debug output was truncated in the Node-RED sidebar, hiding *why* a valid JK02 frame was rejected. The new **BMS1 / BMS2 - diagnostic lisible 20s** Debug emits one short status per MAC plus at most two **separate short rejection lines** (24S and 32S) every 20 s. It reports the first failing validation, e.g. enabled cell count, implausible pack voltage, cell-sum mismatch, SOC > 100, current or temperature, with a count of remaining failures. Neither raw packets nor unverified readings are published to MQTT. The 0.1.8 BLE logic and existing telemetry decoder are unchanged.
+
+The old verbose Debug is automatically turned off on upgrade when its stock ID/name still match; customized or renamed user nodes are left alone. Existing custom flow nodes and wires remain in place, and `merge_flows.py` backs up the installed flow. A clean installation includes vendor links from BLE events, assembled valid frames and verified decoded measurements to the new compact function.
+
+To troubleshoot, send the **three short output lines** for `BMS 1A:EF` from this new Debug. The 24S and 32S rejection lines identify which data-field interpretation fails before changing any decoder checks.

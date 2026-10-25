@@ -132,6 +132,38 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_upgrade_adds_compact_diagnostic_without_overwriting_custom_nodes(self):
+        short = ROOT / "smart-jkbms-bluetooth" / "short_diagnostics_flows.json"
+        health = ROOT / "smart-jkbms-bluetooth" / "health_flows.json"
+        summary = ROOT / "smart-jkbms-bluetooth" / "summary_flows.json"
+        installed = (
+            json.loads(PACKAGED.read_text()) +
+            json.loads(DECODER.read_text()) +
+            json.loads(health.read_text()) +
+            json.loads(summary.read_text())
+        )
+        installed = [n for n in installed if n["id"] != "b111a90000000002"]
+        for node in installed:
+            if node["id"] == "b190021900000003":
+                node["active"] = True
+            if node["id"] in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
+                node["wires"][0] = [n for n in node["wires"][0] if n != "b111a90000000002"]
+        custom = {"id":"owner_custom","type":"comment","name":"Untouched","z":"b150100000000001"}
+        installed.append(custom)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "flows.json"
+            path.write_text(json.dumps(installed))
+            mod.merge(path, PACKAGED, DECODER, summary, health, short)
+            nodes = {n["id"]:n for n in json.loads(path.read_text())}
+            self.assertEqual(nodes["owner_custom"],custom)
+            self.assertFalse(nodes["b190021900000003"]["active"])
+            self.assertTrue(nodes["b111a90000000004"]["active"])
+            for origin in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
+                self.assertIn("b111a90000000002",nodes[origin]["wires"][0])
+            self.assertEqual(mod.merge(path,PACKAGED,DECODER,summary,health,short),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()
