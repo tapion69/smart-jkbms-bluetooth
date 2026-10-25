@@ -171,7 +171,7 @@ class MQTTTests(unittest.TestCase):
         self.assertIn("homeassistant/status",c.subscribed)
         self.assertTrue(all(retained for topic,_,_,retained in c.published
                             if topic.endswith("/config")))
-        refused=ReasonCode(PacketTypes.CONNACK,"Bad User Name or Password")
+        refused=ReasonCode(PacketTypes.CONNACK,"Bad user name or password")
         c.published.clear()
         m.on_connect(c,None,None,refused,None)
         self.assertFalse(m.connected)
