@@ -611,7 +611,12 @@ class HomeAssistantMQTT:
             if dc:opts["device_class"]=dc
             if sc:opts["state_class"]=sc
             if key in INFO_NAMES:opts["entity_category"]="diagnostic"
-            if key=="voltage_v":opts["suggested_display_precision"]=2
+            if key=="voltage_v":
+                # Publish two fractional digits while preserving measurement
+                # metadata. A user's HA precision override still takes priority.
+                opts["value_template"] = ("{{ '%.2f' | format(value_json.get('voltage_v') | float) "
+                                          "if value_json.get('voltage_v') is not none else 'None' }}")
+                opts["suggested_display_precision"]=2
             elif key in ("cell_min_v","cell_max_v","cell_avg_v","cell_delta_v"):
                 opts["suggested_display_precision"]=3
             elif key in ("current_a","balance_current_a"):opts["suggested_display_precision"]=3
@@ -636,7 +641,7 @@ class HomeAssistantMQTT:
             known.add(key)
         # An independent connectivity entity must remain readable while
         # BLE telemetry is offline, so use availability as its state topic.
-        self._component(mac,"online_status","binary_sensor","01 Online",{
+        self._component(mac,"online_status","binary_sensor","Online",{
             "state_topic":root+"/availability",
             "payload_on":"online","payload_off":"offline",
             "device_class":"connectivity","entity_category":"diagnostic",
@@ -669,7 +674,7 @@ class HomeAssistantMQTT:
         # Some firmware exposes UART2 as a status flag in device info.
         if "uart2_enabled" in readable:
             self._component(mac,"uart2_enabled","binary_sensor",
-                            "40 UART2 Enabled",{
+                            "UART2 Enabled",{
                 "state_topic":root+"/state",
                 "value_template":
                     "{% if value_json.get('uart2_enabled') is none %}None{% elif value_json.get('uart2_enabled') %}ON{% else %}OFF{% endif %}",
@@ -727,7 +732,7 @@ class HomeAssistantMQTT:
                 "availability_topic":root+"/availability",
                 "entity_category":"config","icon":"mdi:lock-open-variant"
             })
-        self._component(mac,"command_status","sensor","99 Last Parameter Command",{
+        self._component(mac,"command_status","sensor","Last Parameter Command",{
             "state_topic":root+"/command_status","entity_category":"diagnostic",
             "availability_topic":root+"/availability"
         })
