@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Version 0.2.4 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Version 0.2.5 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
 Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
@@ -77,3 +77,19 @@ Current source references: [syssi JK-BMS BLE protocol documentation](https://git
 Source and GitHub Actions cover JK02 framing, electrical validation, two-BMS MQTT discovery, parameter write safety, obsolete entity cleanup, and non-destructive Node-RED migration. Tests run without real batteries; verify newly supported measurements against the official JK application or BatMON before relying on them.
 
 For problems, check the add-on log for `MQTT broker connected`, `MQTT Discovery published`, and `Node-RED cleanup` messages before enabling any debugging.
+
+## v0.2.5 — Native HA presentation and runtime fix
+
+**Root cause found:** earlier add-on updates kept the *old* stock Node-RED MQTT forwarding function `b200000000000002`, because `merge_flows.py` upgraded only decoder functions. Consequently, the running MQTT publisher never saw newly introduced fields such as uptime. The v0.2.5 migration recognizes **exact published vendor fingerprints** from 0.2.0/0.2.1/0.2.3/0.2.4 and updates only these unmodified functions, backing up the existing flow. Owner-edited / renamed Functions are **never overwritten**. Test fixtures contain the exact prior published versions. For custom code, a warning is logged and review remains necessary.
+
+**Uptime is now independently derived in Python** from a CRC-valid type-0x02 JK02 frame, matched to a verified per-BMS electrical result using the frame counter; for JK02_32S the u32 little-endian seconds count is at byte offset **194**, and for JK02_24S at **162** (as independently decoded by syssi and BatMON). This avoids depending on JavaScript cached supplemental fields. The single human-readable `Total_runtime` entity uses the established `total_runtime_formatted` unique ID. Example: 53293405 seconds -> `616j 19h 43m`. No duplicate raw uptime sensor is registered.
+
+**Better native HA organization:** charging cycles (`Nombre_Cycle`), accumulated cycle capacity and SOH are ordinary measured sensors, not hidden in the Diagnostic category. For each cell, voltage and wire resistance now use the **same primary measured-sensor category** and adjacent sortable names: `Cellule 01 - 1 Tension`, `Cellule 01 - 2 Résistance`; then cell 02, etc. Their original MAC-based unique IDs are preserved so histories are not lost. Note that Home Assistant's built-in device page ultimately controls sorting; a custom Lovelace card can provide stricter two-row-per-cell layout if needed.
+
+**No phantom diagnostics:** optional information from the 0x03 device-info frame and optional extended diagnostics is now advertised only after a genuine non-null value has actually arrived. Old retained MQTT discovery is tombstoned before republishing each BMS's active supported entities, and **all legacy sensor announcements for parameters that already have Configuration number/switch entities** are deleted. Unknown is still correct for parameters that have never been received as CRC-valid settings (type 0x01); it cannot be fixed safely by copying another unrelated measurement.
+
+These are deliberately presentation and data-reliability changes. No change is made to BLE sessions, thermal protections or register write safety.
+
+**Protocol comparisons:** [syssi BLE JK02_32S frame offsets](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md), [BatMON JK BLE decoder](https://github.com/fl4p/batmon-ha/blob/master/bmslib/models/jikong.py). Verified against simulated 24S/32S type-0x02 packets with 300-byte checksum, MQTT data flow, discovery, and previous released forwarding functions.
+
+**After upgrading:** restart the add-on, allow the current MQTT discovery to refresh, and review both devices. No manual deletion of MQTT devices is necessary. The old entity labels may persist if Home Assistant was customized by the owner; the entity's display name can be reset in its settings.

@@ -40,7 +40,7 @@ MEASURES = [
  ("charge_power_w","Puissance de charge","W","power","measurement",None),
  ("discharge_power_w","Puissance de décharge","W","power","measurement",None),
  ("soc_pct","État de charge","%","battery","measurement",None),
- ("soh_pct","État de santé","%",None,"measurement","diagnostic"),
+ ("soh_pct","État de santé","%",None,"measurement",None),
  ("cell_min_v","Cellule minimum","V","voltage","measurement",None),
  ("cell_max_v","Cellule maximum","V","voltage","measurement",None),
  ("cell_avg_v","Cellule moyenne","V","voltage","measurement",None),
@@ -48,8 +48,8 @@ MEASURES = [
  ("balance_current_a","Courant équilibrage","A","current","measurement",None),
  ("balance_state","Équilibrage",None,None,None,None),
  ("capacity_remaining_ah","Capacité restante","Ah",None,"measurement",None),
- ("total_cycle_capacity_ah","Capacité cumulée cyclée","Ah",None,None,"diagnostic"),
- ("cycles","Cycles",None,None,"total_increasing","diagnostic"),
+ ("total_cycle_capacity_ah","Capacité cumulée cyclée","Ah",None,None,None),
+ ("cycles","Cycles",None,None,"total_increasing",None),
  ("temp1_c","Température sonde 1","°C","temperature","measurement",None),
  ("temp2_c","Température sonde 2","°C","temperature","measurement",None),
  ("mos_temp_c","Température MOS","°C","temperature","measurement",None),
@@ -74,7 +74,7 @@ MEASURES = [
  ("emergency_time_countdown_s","Emergency_countdown","s","duration","measurement","diagnostic"),
  ("charge_status_time_s","Charge_status_time","s","duration","measurement","diagnostic"),
  ("detail_log_count","Detail_log_count",None,None,None,"diagnostic"),
- ("total_runtime_formatted","Total_runtime_formatted",None,None,None,"diagnostic"),
+ ("total_runtime_formatted","Durée totale de fonctionnement",None,None,None,None),
  ("discharge_ocp_release_s","Discharge_OCP_recovery","s","duration","measurement","diagnostic"),
  ("discharge_short_release_s","Discharge_short_recovery","s","duration","measurement","diagnostic"),
  ("charge_ocp_release_s","Charge_OCP_recovery","s","duration","measurement","diagnostic"),
@@ -129,6 +129,17 @@ RETIRED_SENSOR_KEYS = [
     "cell_delta_mv"
 ]
 RETIRED_BINARY_KEYS = ["balancing_active","pcl_module_active"]
+
+# Discovery of optional diagnostic fields is deferred until their source
+# actually reports a value. Missing 0x03 information is not an HA sensor
+# stuck at Unknown forever.
+ALWAYS_SENSOR_KEYS = {
+ "voltage_v","current_a","power_w","charge_power_w","discharge_power_w",
+ "soc_pct","capacity_remaining_ah","cell_min_v","cell_max_v","cell_avg_v",
+ "balance_current_a","cycles","soh_pct","temp1_c","temp2_c","mos_temp_c",
+}
+ALWAYS_BINARY_KEYS = {"charging_mos","discharging_mos","alarm_active"}
+
 
 
 def short_id(mac: str) -> str:
@@ -305,6 +316,23 @@ def enrich(d: dict[str,Any], extras: dict[str,Any]) -> dict[str,Any] | None:
     return out
 
 
+def runtime_from_validated_frame(raw:bytes,format_name:str)->dict[str,Any]:
+    # syssi JK02 BLE and BatMON both decode uptime as uint32 seconds:
+    # offset 162 on JK02_24S, 194 on JK02_32S (+32).
+    offset={"JK02_24S":162,"JK02_32S":194}.get(format_name)
+    if offset is None or len(raw)!=300 or raw[4]!=2:
+        return {}
+    seconds=int.from_bytes(raw[offset:offset+4],"little")
+    days,remainder=divmod(seconds,86400)
+    hours,remainder=divmod(remainder,3600)
+    minutes=remainder//60
+    return {
+        "total_runtime_s":seconds,
+        "total_runtime_formatted":f"{days}j {hours:02d}h {minutes:02d}m",
+    }
+
+
+
 class HomeAssistantMQTT:
     def __init__(self,cfg:dict[str,Any],addresses:list[str],control:Any=None,
                  client:Any=None) -> None:
@@ -332,6 +360,9 @@ class HomeAssistantMQTT:
         self.last_type3:dict[str,bytes]={}
         self.last_confirmed:dict[str,float]={}
         self.discovered_cells:dict[str,int]={}
+        self.discovered_readable:dict[str,set[str]]={mac:set() for mac in addresses}
+        self.last_telemetry_frame:dict[str,tuple[float,bytes]]={}
+        self.last_telemetry_sequence:dict[str,int]={}
         self.permission:dict[str,bool]={mac:False for mac in addresses}
         self.command_pending:dict[str,float]={}
         self.loop:asyncio.AbstractEventLoop|None=None
@@ -474,6 +505,8 @@ class HomeAssistantMQTT:
 
     def discover(self,mac:str,cells:int=16)->None:
         root=self.base(mac)
+        readable={key for key,value in self.full_state(mac).items() if value is not None}
+        known=self.discovered_readable.setdefault(mac,set())
         names={
           "voltage_v":"Tension_Totale_volt","current_a":"Courant_total",
           "power_w":"Puissance_Totale","soc_pct":"SOC_pourcentage",
@@ -492,11 +525,12 @@ class HomeAssistantMQTT:
           "heating_current_a":"Heating_Current",
           "power_on_count":"Power_On_Count",
           "charge_status_time_s":"charge_status_time",
-          "total_runtime_formatted":"Total_runtime_formatted",
+          "total_runtime_formatted":"Total_runtime",
         }
         skip_params=set(BY_KEY)
         for key,label,unit,dc,sc,category in MEASURES:
             if key in skip_params or key=="cell_delta_mv":continue
+            if key not in ALWAYS_SENSOR_KEYS and key not in readable:continue
             opts={"state_topic":root+"/state",
                   "value_template":"{{ value_json.get('"+key+"') }}",
                   "availability_topic":root+"/availability"}
@@ -515,6 +549,7 @@ class HomeAssistantMQTT:
                     {"topic":root+"/temperature/"+key+"/availability"}]
                 opts["availability_mode"]="all"
             self._component(mac,key,"sensor",names.get(key,label),opts)
+            known.add(key)
         for key,label in [("cell_delta_v","cell_voltage_delta"),("cell_max_number","cell_voltage_max_number"),
                            ("cell_min_number","cell_voltage_min_number")]:
             opts={"state_topic":root+"/state",
@@ -526,6 +561,7 @@ class HomeAssistantMQTT:
                              "suggested_display_precision":3})
             else:opts["entity_category"]="diagnostic"
             self._component(mac,key,"sensor",label,opts)
+            known.add(key)
         # An independent connectivity entity must remain readable while
         # BLE telemetry is offline, so use availability as its state topic.
         self._component(mac,"online_status","binary_sensor","Online",{
@@ -534,6 +570,7 @@ class HomeAssistantMQTT:
             "device_class":"connectivity","entity_category":"diagnostic",
         })
         for key,label in BINARY_MEASURES:
+            if key not in ALWAYS_BINARY_KEYS and key not in readable:continue
             self._component(mac,key,"binary_sensor",names.get(key,label),{
                 "state_topic":root+"/state",
                 "value_template":"{% if value_json.get('"+key+"') is none %}None{% elif value_json.get('"+key+"') %}ON{% else %}OFF{% endif %}",
@@ -542,20 +579,27 @@ class HomeAssistantMQTT:
                 **({"entity_category":"diagnostic","device_class":"problem"} if key=="alarm_active"
                    else {"entity_category":"diagnostic"})
             })
+            known.add(key)
         for i in range(1,cells+1):
-            self._component(mac,f"cell_{i:02d}_v","sensor",f"Cell_{i}_volt",{
+            # Same main HA category and sortable names keep each resistance
+            # visually next to its own cell voltage on the native device page.
+            self._component(mac,f"cell_{i:02d}_v","sensor",f"Cellule {i:02d} - 1 Tension",{
                 "state_topic":root+"/state",
                 "value_template":"{{ value_json.get('cell_%02d_v') }}"%i,
                 "unit_of_measurement":"V","device_class":"voltage",
                 "state_class":"measurement","suggested_display_precision":3,
                 "availability_topic":root+"/availability"})
-            self._component(mac,f"cell_{i:02d}_resistance_ohm","sensor",
-                f"Cell_{i}_ohm",{
+            known.add(f"cell_{i:02d}_v")
+            resistance=f"cell_{i:02d}_resistance_ohm"
+            if resistance not in readable:continue
+            self._component(mac,resistance,"sensor",
+                f"Cellule {i:02d} - 2 Résistance",{
                 "state_topic":root+"/state",
                 "value_template":"{{ value_json.get('cell_%02d_resistance_ohm') }}"%i,
                 "unit_of_measurement":"Ω","state_class":"measurement",
-                "suggested_display_precision":3,"entity_category":"diagnostic",
+                "suggested_display_precision":3,
                 "availability_topic":root+"/availability"})
+            known.add(resistance)
         # Each documented setting has a single editable Number or Switch, not
         # both a sensor and an editable entity with competing unique IDs.
         for p in PARAMS:
@@ -579,22 +623,22 @@ class HomeAssistantMQTT:
             self._component(mac,p.key,p.kind,p.label,options)
         self._component(mac,"write_permission","switch",
             "Autoriser modification paramètres",{
-                "state_topic":root+"/write_permission/state",
-                "command_topic":root+"/write_permission/set",
-                "payload_on":"ON","payload_off":"OFF",
-                "optimistic":False,"retain":False,
-                "availability_topic":root+"/availability",
-                "entity_category":"config","icon":"mdi:lock-open-variant"
-            })
-        self._component(mac,"command_status","sensor","Dernière commande paramètres",{
-            "state_topic":root+"/command_status","entity_category":"diagnostic",
-            "availability_topic":root+"/availability"
-        })
-        self.discovered_cells[mac]=max(self.discovered_cells.get(mac,0),cells)
-
-    def rediscover(self)->None:
+                "state_t    def rediscover(self)->None:
         for mac in self.addresses:
             identity=short_id(mac)
+            # Remove stale optional discoveries from previous versions. Publish
+            # them again below only if the BMS has supplied real measurements.
+            for key,*_ in MEASURES:
+                if key not in ALWAYS_SENSOR_KEYS and key not in BY_KEY:
+                    self.send(f"{self.discovery}/sensor/{identity}_{key}/config","")
+            for idx in range(1,33):
+                self.send(f"{self.discovery}/sensor/{identity}_cell_{idx:02d}_resistance_ohm/config","")
+            for key,*_ in BINARY_MEASURES:
+                if key not in ALWAYS_BINARY_KEYS:
+                    self.send(f"{self.discovery}/binary_sensor/{identity}_{key}/config","")
+            self.discovered_readable[mac]=set()
+            for p in PARAMS:
+                self.send(f"{self.discovery}/sensor/{identity}_{p.key}/config","")
             # Remove retained v0.2.3 discovery entries without deleting valid
             # measurements or the stable per-MAC Home Assistant device.
             for key in RETIRED_SENSOR_KEYS:
@@ -688,10 +732,23 @@ class HomeAssistantMQTT:
                 extra=data.get("extras") if isinstance(data.get("extras"),dict) else {}
                 decoded=enrich(data.get("data") or {},extra)
                 if decoded is None:return False
+                source=data.get("data") or {}
+                sequence=source.get("sequence")
+                if type(sequence) is int:
+                    self.last_telemetry_sequence[mac]=sequence
+                frame=self.last_telemetry_frame.get(mac)
+                if frame is not None and time.monotonic()-frame[0]<15:
+                    if type(sequence) is int and frame[1][5]==sequence:
+                        decoded.update(runtime_from_validated_frame(frame[1],decoded["format"]))
                 self.state[mac]=decoded
                 self.last_data[mac]=time.monotonic()
-                current=self.discovered_cells.get(mac,0)
-                if decoded["cell_count"] > current:
+                readable={key for key,value in self.full_state(mac).items() if value is not None}
+                if (decoded["cell_count"] > self.discovered_cells.get(mac,0) or
+                    not readable.issubset(self.discovered_readable.get(mac,set()).union(
+                        {p.key for p in PARAMS}).union(
+                        ALWAYS_SENSOR_KEYS).union(ALWAYS_BINARY_KEYS).union({
+                        f"cell_{index:02d}_v" for index in range(1,33)}).union({
+                        "cell_delta_v","cell_min_number","cell_max_number"}))):
                     self.discover(mac,decoded["cell_count"])
                 self.emit(mac,"state",self.full_state(mac))
                 self._temps_available(mac,decoded)
@@ -699,10 +756,22 @@ class HomeAssistantMQTT:
                 self.online_cache[mac]=True
 
                 return True
-            if kind=="frame" and data.get("frame_type") in (1,3):
+            if kind=="frame" and data.get("frame_type") in (1,2,3):
                 frame_type=data["frame_type"]
                 raw=valid_frame(data.get("raw_hex"),frame_type)
                 if raw is None:return False
+                if frame_type==2:
+                    self.last_telemetry_frame[mac]=(time.monotonic(),raw)
+                    if (mac in self.state and
+                        self.last_telemetry_sequence.get(mac)==raw[5]):
+                        new=runtime_from_validated_frame(raw,
+                                                       self.state[mac].get("format"))
+                        if new:
+                            self.state[mac].update(new)
+                            if "total_runtime_formatted" not in self.discovered_readable.get(mac,set()):
+                                self.discover(mac,max(16,self.discovered_cells.get(mac,16)))
+                            self.emit(mac,"state",self.full_state(mac))
+                    return True
                 if frame_type==1:
                     parsed=parse_settings(raw)
                     if not parsed:return False
@@ -712,11 +781,15 @@ class HomeAssistantMQTT:
                 else:
                     self.info[mac]=parse_info(raw)
                 if mac in self.state:
+                    if frame_type==3:
+                        self.discover(mac,max(16,self.discovered_cells.get(mac,16)))
                     self.emit(mac,"state",self.full_state(mac))
                 return True
             if kind=="lifecycle" and data.get("event") in ("disconnected","stream_stale"):
                 self.emit(mac,"availability","offline")
                 self.last_data.pop(mac,None)
+                self.last_telemetry_frame.pop(mac,None)
+                self.last_telemetry_sequence.pop(mac,None)
                 self.permission[mac]=False
                 self.emit(mac,"write_permission/state","OFF")
                 self.online_cache[mac]=False

@@ -48,7 +48,11 @@ function raw(mac,type=2,seq=5){
  return {address:mac,type,sequence:seq,crc_ok:true,raw_hex:b.toString("hex").toUpperCase()};
 }
 const frame=raw(macA);
-assert.equal(call(frame),null);
+const framed=call(frame);
+assert(framed);
+assert.equal(JSON.parse(framed.payload).frame_type,2);
+assert.equal(JSON.parse(framed.payload).kind,"frame");
+assert.equal(JSON.parse(framed.payload).raw_hex,frame.raw_hex);
 const data={
  address:macA,sequence:5,validation:"provisional_compare_with_BatMON",source_crc_ok:true,
  format:"JK02_32S",voltage_v:51.32,current_a:-0.5,power_w:-25.7,

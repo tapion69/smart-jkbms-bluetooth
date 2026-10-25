@@ -18,6 +18,35 @@ def stock():
 
 
 class FlowMigrationTests(unittest.TestCase):
+    def test_installed_legacy_mqtt_forwarders_receive_safe_upgrade(self):
+        fixtures=json.loads((ROOT/"tests"/"fixtures"/"legacy_mqtt_forwarders.json").read_text())
+        canonical=next(n for n in stock() if n["id"]=="b200000000000002")
+        for fixture in fixtures:
+            with self.subTest(ref=fixture["ref"]):
+                arr=stock()
+                current=next(n for n in arr if n["id"]=="b200000000000002")
+                current["func"]=fixture["node"]["func"]
+                with tempfile.TemporaryDirectory() as td:
+                    file=Path(td)/"flows.json"
+                    file.write_text(json.dumps(arr))
+                    mod.merge(file,*PACKAGED)
+                    nodes={n["id"]:n for n in json.loads(file.read_text())}
+                    self.assertEqual(nodes[current["id"]]["func"],canonical["func"])
+                    self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+                    self.assertEqual(mod.merge(file,*PACKAGED),0)
+
+    def test_custom_mqtt_forwarder_never_overwritten(self):
+        arr=stock()
+        current=next(n for n in arr if n["id"]=="b200000000000002")
+        current["func"]+="\n// owner modification"
+        expected=current["func"]
+        with tempfile.TemporaryDirectory() as td:
+            file=Path(td)/"flows.json"
+            file.write_text(json.dumps(arr))
+            self.assertEqual(mod.merge(file,*PACKAGED),0)
+            found=next(n for n in json.loads(file.read_text()) if n["id"]==current["id"])
+            self.assertEqual(found["func"],expected)
+
     def test_fresh_install_has_only_essential_nodes(self):
         with tempfile.TemporaryDirectory() as td:
             file=Path(td)/"flows.json"

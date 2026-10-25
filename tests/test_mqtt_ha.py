@@ -98,6 +98,77 @@ class MQTTTests(unittest.TestCase):
             self.assertTrue(d["unique_id"].startswith(d["device"]["identifiers"][0]))
         self.assertEqual(len(info),len(set(d["unique_id"] for d in info)))
 
+    def test_v025_runtime_derived_from_confirmed_type2_for_both_profiles(self):
+        from mqtt_ha import runtime_from_validated_frame
+        m,c=self.instance()
+        for address,offset,format_name in [
+            (A,194,"JK02_32S"),(B,162,"JK02_24S")
+        ]:
+            seconds=53293405
+            frame=bytearray(300)
+            frame[:5]=bytes.fromhex("55 AA EB 90 02")
+            frame[5]=27
+            frame[offset:offset+4]=seconds.to_bytes(4,"little")
+            frame[299]=sum(frame[:299])&255
+            self.assertTrue(m.ingest({"kind":"frame","address":address,
+                "frame_type":2,"raw_hex":frame.hex()}))
+            record=sample_data(address)
+            record["data"]["format"]=format_name
+            record["data"]["sequence"]=27
+            self.assertTrue(m.ingest(record))
+            state=json.loads([p for t,p,_,_ in c.published
+                              if t==m.base(address)+"/state"][-1])
+            expected=runtime_from_validated_frame(bytes(frame),format_name)
+            self.assertEqual(state["total_runtime_formatted"],expected["total_runtime_formatted"])
+            self.assertEqual(expected["total_runtime_s"],seconds)
+            self.assertEqual(state["total_runtime_formatted"],"616j 19h 43m")
+            discovery=[json.loads(p) for topic,p,_,_ in c.published
+                    if topic.endswith("/config") and p and
+                    topic.endswith("_total_runtime_formatted/config")]
+            self.assertTrue(discovery)
+            self.assertNotEqual(discovery[-1].get("entity_category"),"diagnostic")
+
+    def test_v025_groups_cell_resistance_next_to_voltage_and_cycles_as_sensor(self):
+        m,c=self.instance()
+        m.ingest(sample_data(A))
+        device=short_id(A)
+        conf={topic:json.loads(p) for topic,p,_,_ in c.published
+              if topic.endswith("/config") and p}
+        def cfg(kind,key):
+            return conf[f"{m.discovery}/{kind}/{device}_{key}/config"]
+        voltage=cfg("sensor","cell_01_v")
+        resistance=cfg("sensor","cell_01_resistance_ohm")
+        self.assertLess(voltage["name"],resistance["name"])
+        self.assertNotIn("entity_category",voltage)
+        self.assertNotIn("entity_category",resistance)
+        self.assertEqual(voltage["suggested_display_precision"],3)
+        self.assertEqual(resistance["suggested_display_precision"],3)
+        self.assertNotIn("entity_category",cfg("sensor","cycles"))
+        self.assertNotIn("entity_category",cfg("sensor","soh_pct"))
+        self.assertNotIn("entity_category",cfg("sensor","total_cycle_capacity_ah")) if (
+           f"{m.discovery}/sensor/{device}_total_cycle_capacity_ah/config" in conf
+        ) else None
+
+    def test_v025_do_not_discover_optional_unknown_diagnostics(self):
+        m,c=self.instance()
+        m.on_connect(c,None,None,0,None)
+        id=short_id(A)
+        base=f"{m.discovery}/sensor/{id}"
+        self.assertIn((base+"_device_model/config","",1,True),c.published)
+        discovered={topic:json.loads(p) for topic,p,_,_ in c.published if topic.endswith("/config") and p}
+        self.assertNotIn(base+"_device_model/config",discovered)
+        self.assertNotIn(base+"_heating_current_a/config",discovered)
+        m.ingest(sample_data(A))
+        discovered={topic:json.loads(p) for topic,p,_,_ in c.published if topic.endswith("/config") and p}
+        self.assertIn(base+"_capacity_remaining_ah/config",discovered)
+        self.assertIn(base+"_cell_01_resistance_ohm/config",discovered)
+        self.assertNotIn(base+"_device_model/config",discovered)
+        settings=settings_frame()
+        self.assertTrue(m.ingest({"kind":"frame","address":A,"frame_type":1,"raw_hex":settings}))
+        published={topic:json.loads(p) for topic,p,_,_ in c.published if topic.endswith("/config") and p}
+        self.assertIn(f"{m.discovery}/number/{id}_cell_uvp_v/config",published)
+        self.assertNotIn(base+"_cell_uvp_v/config",published)
+
     def test_rejects_unverified_or_wrong_pack(self):
         m,c=self.instance()
         bad=sample_data()
@@ -390,6 +461,7 @@ class MQTTTests(unittest.TestCase):
 
     def test_precision_names_and_volts_delta_discovery(self):
         m,c=self.instance()
+        m.ingest(sample_data(A))
         m.discover(A,16)
         conf={topic:json.loads(value) for topic,value,_,_
               in c.published if topic.endswith("/config") and value}
@@ -397,10 +469,10 @@ class MQTTTests(unittest.TestCase):
         ident=short_id(A)
         def item(component,key):
             return conf[f"{prefix}/{component}/{ident}_{key}/config"]
-        self.assertEqual(item("sensor","cell_01_v")["name"],"Cell_1_volt")
+        self.assertEqual(item("sensor","cell_01_v")["name"],"Cellule 01 - 1 Tension")
         self.assertEqual(item("sensor","cell_01_v")["suggested_display_precision"],3)
         self.assertEqual(item("sensor","cell_16_v")["suggested_display_precision"],3)
-        self.assertEqual(item("sensor","cell_01_resistance_ohm")["name"],"Cell_1_ohm")
+        self.assertEqual(item("sensor","cell_01_resistance_ohm")["name"],"Cellule 01 - 2 Résistance")
         self.assertEqual(item("sensor","voltage_v")["name"],"Tension_Totale_volt")
         self.assertEqual(item("sensor","voltage_v")["suggested_display_precision"],1)
         self.assertEqual(item("sensor","cell_delta_v")["unit_of_measurement"],"V")

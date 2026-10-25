@@ -28,6 +28,15 @@ STOCK_FUNCTIONS_0111 = {
 # only the exact vendor source can be replaced, never a customized Function.
 STOCK_DECODER_0112 = (4071, "a4454e533518ac4f")
 
+# Exact, unmodified GitHub vendor MQTT forwarding functions from v0.2.0–0.2.4.
+# The 0.2.4 merge originally never upgraded this Function node. This made
+# added runtime/diagnostic fields stay Unknown on otherwise upgraded installs.
+STOCK_MQTT_FORWARDERS = {
+    (2992, "753455542d4ab731"),  # v0.2.0
+    (3081, "15794c8740330310"),  # v0.2.1 and early follow-ups
+    (4502, "da76ac1e10a8011f"),  # v0.2.3/0.2.4
+}
+
 
 def legacy_fingerprint(source: str) -> str:
     # 64-bit FNV-1a over unicode code units; current reference functions are
@@ -67,6 +76,22 @@ def update_stock_functions(
             updated += 1
         else:
             print(f"[WARN] Preserving modified Node-RED function {node_id}; update it manually")
+    publisher_id="b200000000000002"
+    current=current_by_id.get(publisher_id)
+    target=packaged_by_id.get(publisher_id)
+    if isinstance(current,dict) and isinstance(target,dict):
+        installed_code=current.get("func")
+        desired=target.get("func")
+        if (current.get("name")==target.get("name") and
+            current.get("type")=="function" and isinstance(installed_code,str) and
+            isinstance(desired,str) and installed_code!=desired):
+            if (len(installed_code),legacy_fingerprint(installed_code)) in STOCK_MQTT_FORWARDERS:
+                current["func"]=desired
+                updated+=1
+                print("[INFO] Stock MQTT forwarder upgraded to current JK02 runtime/diagnostics version")
+            else:
+                print("[WARN] Custom MQTT forwarder retained unchanged; "
+                      "cannot guarantee current diagnostic data until manual review")
     return updated
 
 
