@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.13. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.14. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.13 development milestone
+## Included in v0.1.14 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -159,3 +159,13 @@ The new **TEMPÉRATURES BRUTES JK02 (20 s)** Debug node in **JK-BMS | Mesures** 
 The add-on startup log now reports `JK02 decoder active: current v0.1.12 temperature fallback` when the saved Node-RED Function contains the new decoder, or `legacy v0.1.11` / `customized/unrecognized Function` when the installed decoder is old. The exact add-on version alone cannot prove that the existing Node-RED Function was upgraded. Bluetooth, decoder validation, BMS commands, and MQTT behavior are unchanged. If all three temperature values are not plausible, inspect the actual JK-BMS temperature configuration and compare against BatMON before deciding how best to handle missing probes.
 
 Implementation note: in v0.1.13 the new Debug is connected only to **CRC-verified** frame stream output, not the original raw fragmented BLE notifications. Older Debug nodes remain available but disabled by default.
+
+## Explicit all-three −200 °C JK02 temperature marker (v0.1.14)
+
+Live observations for **BMS 1A:EF** show BLE connected, valid CRC and coherent JK02_32S pack voltage (~51.07 V), 16 enabled cells, but **every standard temperature field is exactly −200.0 °C (raw signed int16 = −2000)**. The other BMS 27:12 reports valid 16–19 °C sensors. This exact repeated value appears to be an unavailable-temperature marker; its precise firmware meaning is **not proven**. The reported `temperature_sensor_absent_mask` of 0x00 vs 0x3F in the other BMS is inconsistent with naïve interpretation, so the bridge preserves that byte for diagnostics but does not use it to infer which physical sensors exist.
+
+Previously v0.1.12 rejected a valid pack when more than one of T1/T2/MOS was invalid. Now the JK02_32S experimental decoder recognizes **only the exact raw triple (-2000,-2000,-2000)** as a special case: if and only if the 300-byte CRC, JK02 frame type, populated cell bitmask, safe plausible cell voltages, pack/sum consistency, pack current, and SOC all pass, it emits **diagnostic-only electrical telemetry**; all three temperatures are `null`, NEVER -200 °C or 0 °C. It marks `temperature_quality: "all_unavailable_raw_minus200"`, `electrical_data_only: true`, and `temperatures_usable_for_safety: false` for every experimental frame. The existing 10-second summary visibly says `TEMP T1,T2,MOS INVALIDE` and renders T1/T2/MOS as `N/D`. The 20-second health diagnostic indicates the unavailable channels. Arbitrary double/triple invalid temperatures (e.g. -201.0 °C or +3276.7 °C) remain rejected. All electrical validation remains strict.
+
+**Do not use these missing temperatures to control charging, cooling, safety interlocks, overheat/undercool alarms or battery protection.** The BMS's own onboard protections must remain independent. Before Home Assistant MQTT Discovery, compare the electrical measurements and the physical sensor status to BatMON/the JK app on BMS 1.
+
+The non-destructive startup migrator upgrades only an **exactly unchanged stock v0.1.11 or v0.1.12/v0.1.13 decoder**. Customized function code is never overwritten, with a startup warning instead. The code remains independent of the syssi implementation.

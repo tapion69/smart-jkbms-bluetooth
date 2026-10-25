@@ -226,6 +226,37 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_upgrade_exact_v0112_decoder_to_v0114(self):
+        fixture=ROOT / "tests" / "fixtures" / "stock_decoder_0112.json"
+        decoder_package = json.loads(DECODER.read_text())
+        decoder = next(n for n in decoder_package if n["id"]=="b150100000000004")
+        decoder["func"]=json.loads(fixture.read_text())["func"]
+        with tempfile.TemporaryDirectory() as td:
+            dst=Path(td)/"flows.json"
+            dst.write_text(json.dumps(decoder_package))
+            self.assertEqual(mod.merge(dst,DECODER),0)
+            upgraded={n["id"]:n for n in json.loads(dst.read_text())}
+            latest={n["id"]:n for n in json.loads(DECODER.read_text())}
+            self.assertEqual(upgraded["b150100000000004"]["func"],
+                             latest["b150100000000004"]["func"])
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+            self.assertEqual(mod.merge(dst,DECODER),0)
+
+    def test_preserve_custom_decoder_when_upgrading_from_v0112(self):
+        fixture=ROOT / "tests" / "fixtures" / "stock_decoder_0112.json"
+        decoder_package = json.loads(DECODER.read_text())
+        node=next(n for n in decoder_package if n["id"]=="b150100000000004")
+        node["func"]=json.loads(fixture.read_text())["func"]+"\n// personalized user edit"
+        with tempfile.TemporaryDirectory() as td:
+            dst=Path(td)/"flows.json"
+            dst.write_text(json.dumps(decoder_package))
+            mod.merge(dst,DECODER)
+            result={n["id"]:n for n in json.loads(dst.read_text())}
+            self.assertTrue(result["b150100000000004"]["func"].endswith(
+                "// personalized user edit"))
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,6 +83,33 @@ badCells[299]=badCells.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
 const invalidElectrical=run(badCells);
 assert(!invalidElectrical || !invalidElectrical[0],"Unsafe electrical data stays rejected");
 
+// BMS 1 captured in the field: 16 healthy cells and consistent pack metrics,
+// but every JK02_32S temperature is the exact raw -2000 sentinel.
+const unavailable=sample("JK02_32S");
+for(const offset of [162,164,144])unavailable.writeInt16LE(-2000,offset);
+unavailable[299]=unavailable.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+const recovered=run(unavailable);
+assert(recovered&&recovered[0]&&recovered[0].payload,"Electrical-only sentinel frame must decode");
+const recoveredPack=recovered[0].payload;
+assert.equal(recoveredPack.format,"JK02_32S");
+assert.equal(recoveredPack.cell_count,16);
+assert.equal(recoveredPack.soc_pct,76);
+assert.equal(recoveredPack.current_a,-1.25);
+assert(recoveredPack.voltage_v>52&&recoveredPack.voltage_v<54);
+assert.equal(recoveredPack.temperature_quality,"all_unavailable_raw_minus200");
+assert.equal(recoveredPack.electrical_data_only,true);
+assert.equal(recoveredPack.temperatures_usable_for_safety,false);
+assert.equal(recoveredPack.temperatures_present,false);
+assert.deepEqual(recoveredPack.invalid_temperature_channels,["T1","T2","MOS"]);
+assert.deepEqual(recoveredPack.invalid_temperature_raw_tenths,
+ {T1:-2000,T2:-2000,MOS:-2000});
+for(const key of ["temp1_c","temp2_c","mos_temp_c"])assert.equal(recoveredPack[key],null);
+const notSentinel=sample("JK02_32S");
+for(const offset of [162,164,144])notSentinel.writeInt16LE(-2010,offset);
+notSentinel[299]=notSentinel.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+const rejectedTriple=run(notSentinel);
+assert(!rejectedTriple||!rejectedTriple[0],"Arbitrary 3 bad temperatures must stay rejected");
+
 const empty=Buffer.alloc(300);empty.set([0x55,0xAA,0xEB,0x90,2,9]);empty[299]=empty.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
 // Reset the per-BMS rejection throttle after preceding negative test cases.
 stored.delete("reject:C8:47:80:1A:27:12");

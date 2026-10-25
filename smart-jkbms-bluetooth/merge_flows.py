@@ -24,6 +24,10 @@ STOCK_FUNCTIONS_0111 = {
     "b111a90000000002": (3500, "dd5173ca8290ccef"),
 }
 
+# Published unmodified v0.1.12/v0.1.13 decoder. A safe additional migration:
+# only the exact vendor source can be replaced, never a customized Function.
+STOCK_DECODER_0112 = (4071, "a4454e533518ac4f")
+
 
 def legacy_fingerprint(source: str) -> str:
     # 64-bit FNV-1a over unicode code units; current reference functions are
@@ -54,7 +58,11 @@ def update_stock_functions(
         desired = packaged.get("func")
         if before == desired:
             continue
-        if len(before) == length and legacy_fingerprint(before) == fingerprint:
+        fp = legacy_fingerprint(before)
+        known_v0111 = len(before) == length and fp == fingerprint
+        known_v0112_decoder = (node_id == "b150100000000004"
+            and (len(before), fp) == STOCK_DECODER_0112)
+        if known_v0111 or known_v0112_decoder:
             installed["func"] = desired
             updated += 1
         else:
@@ -96,11 +104,14 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     installed_code = decoder.get("func") if isinstance(decoder, dict) else None
     packaged_code = packaged_decoder.get("func") if isinstance(packaged_decoder, dict) else None
     if isinstance(installed_code, str) and installed_code == packaged_code:
-        print("[INFO] JK02 decoder active: current v0.1.12 temperature fallback")
+        print("[INFO] JK02 decoder active: current v0.1.14 exact -200C raw sentinel fallback")
     elif isinstance(installed_code, str):
         old_size, old_fingerprint = STOCK_FUNCTIONS_0111["b150100000000004"]
-        if len(installed_code) == old_size and legacy_fingerprint(installed_code) == old_fingerprint:
-            print("[WARN] JK02 decoder active: legacy v0.1.11; temperature fallback not installed")
+        old_fp = legacy_fingerprint(installed_code)
+        if (len(installed_code), old_fp) == STOCK_DECODER_0112:
+            print("[WARN] JK02 decoder active: legacy v0.1.12; raw -200C fallback not installed")
+        elif len(installed_code) == old_size and old_fp == old_fingerprint:
+            print("[WARN] JK02 decoder active: legacy v0.1.11; raw -200C fallback not installed")
         else:
             print("[WARN] JK02 decoder active: customized/unrecognized Function; upgrade preserved it")
     else:
