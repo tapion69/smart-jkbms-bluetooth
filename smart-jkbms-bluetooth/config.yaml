@@ -24,6 +24,7 @@ options:
   bms_addresses: ""
   connection_probe_seconds: 15
   persistent_connections: true
+  allow_parameter_changes: false
   adapter_reset_on_start: false
   mqtt_enabled: true
   mqtt_host: core-mosquitto
@@ -42,6 +43,7 @@ schema:
   bms_addresses: str?
   connection_probe_seconds: int(5,60)
   persistent_connections: bool
+  allow_parameter_changes: bool
   adapter_reset_on_start: bool
   mqtt_enabled: bool
   mqtt_host: str
