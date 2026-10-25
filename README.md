@@ -4,7 +4,7 @@
 
 # Smart JK-BMS Bluetooth for Home Assistant
 
-**Development preview — v0.3.0. Testers wanted!**
+**Development preview — v0.3.1. Testers wanted!**
 
 An experimental, community-tested Home Assistant add-on for monitoring multiple JK-BMS batteries over Bluetooth Low Energy (BLE). The add-on combines a Python/Bleak connection manager, a lightweight Node-RED frame decoder and MQTT Discovery so supported JK-BMS readings appear as native Home Assistant entities. It is **free to use**.
 
@@ -74,6 +74,7 @@ mqtt_username: "your-mqtt-username"
 mqtt_password: "your-mqtt-password"
 allow_parameter_changes: false
 send_bip: false
+bip_endpoint: "" # optional Google Apps Script /exec URL
 ```
 
 Replace example MAC addresses and MQTT credentials with your own. Never share passwords, full configuration backups, internal IDs or private logs in public bug reports.
@@ -97,7 +98,8 @@ Replace example MAC addresses and MQTT credentials with your own. Never share pa
 | `mqtt_discovery_prefix` | Usually `homeassistant`. |
 | `allow_parameter_changes` | Master safety switch for writing BMS settings. **Default: `false`**. |
 | `debug_mode` | Optional development diagnostics. |
-| `send_bip` | Reserved for optional anonymous installation-count telemetry. **Not operational in this preview; leave `false`.** |
+| `send_bip` | Opt in to a startup and daily anonymous BIP. Default `false`, so nothing is transmitted unless you enable it. |
+| `bip_endpoint` | The Google Apps Script Web App `/exec` HTTPS URL for your authorized installation counter. Empty by default; the BIP does not send without it. |
 
 The former `allow_temperature_control` name was misleading: it controlled all JK02 parameter writes, not only temperature. The master write option has been renamed to `allow_parameter_changes`. JK02 read-only information and settings requests remain necessary for monitoring and readback and are performed automatically.
 
@@ -126,9 +128,26 @@ Read-only JK02 `0x96` and `0x97` queries are necessary to retrieve and verify pa
 
 When reporting an issue, please include the add-on version, Home Assistant version, JK-BMS hardware and firmware versions (if known), symptoms and **sanitized** logs or screenshots. Remove MAC addresses, serial numbers, passwords, tokens and private network information before publishing.
 
-## Development, installation counting and privacy
+## Optional installation BIP (privacy and setup)
 
-This project is in active development. We are preparing an **optional** installation heartbeat (BIP), similar to the Smart Voltronic and Smart Energy Finance projects, to understand how many installs are actively testing new versions. The send mechanism and collection endpoint are **not yet verified for this module**, so `send_bip` is intentionally disabled for the public preview. A locally generated UUID v4 is persisted in `/data/smart_jkbms_install_id` and remains stable across add-on updates. It is independent of battery addresses; adding/removing a BMS does not change the installation ID. No battery SOC, MAC address, serial number, MQTT password or precise location should be included in such a heartbeat. A future release must document the exact fields, destination, cadence and opt-out control before enabling network telemetry.
+The add-on includes a separate Node-RED **JK-BMS - BIP** flow based on the same Google Apps Script installation counter design as Smart Energy Finance. It does not affect the BLE, decoding or MQTT flows.
+
+**Disabled by default.** To enable anonymous installation counting, the collector owner must first publish the updated Google Apps Script, then set:
+```yaml
+send_bip: true
+bip_endpoint: "https://script.google.com/macros/s/YOUR_DEPLOYMENT/exec"
+```
+The add-on sends one BIP **15 seconds after Node-RED starts and daily at 15:00 (server/Node-RED local time)**. It transmits only:
+- `module: "jkbms"` — count the correct module in a dedicated `JK-BMS` spreadsheet tab
+- `install_id` — randomly generated UUID v4, stored locally at `/data/smart_jkbms_install_id`
+- `bip: "10"` — HA environment, free version (same convention as existing Finance reporting)
+- `version` — installed add-on version
+
+No battery telemetry, BMS Bluetooth addresses, serial numbers, names, location lookup, latitude, longitude or MQTT credentials are added to the request. As with all HTTPS requests, the destination's web infrastructure may process connection metadata such as your public IP address. You can disable transmission at any time with `send_bip: false`, and the install ID remains unchanged if you later opt back in.
+
+Each installation gets **one row**; startup/daily reports update `last_seen` and version. Adding a third, fourth or fifth BMS does **not** create another installation. Reinstalling after deleting the add-on's persistent data may generate a new identifier.
+
+**Collector setup:** Use the updated multi-module Apps Script that maps `jkbms` to an independent `JK-BMS` tab, then deploy a new Web App version before enabling BIP. The full deployment URL is intentionally not embedded in the public add-on. This also avoids accidentally sending test data to another person's spreadsheet. The counter is informational and has no bearing on Home Assistant functionality.
 
 ## Support this free project
 
