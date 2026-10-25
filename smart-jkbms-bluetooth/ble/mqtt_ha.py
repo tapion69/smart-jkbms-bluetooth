@@ -440,7 +440,7 @@ class HomeAssistantMQTT:
             for mac in self.addresses:
                 base=self.base(mac)
                 if msg.topic==f"{base}/write_permission/set":
-                    allow=(msg.payload==b"ON") and bool(self.cfg.get("allow_temperature_control",False))
+                    allow=(msg.payload==b"ON")
                     self.permission[mac]=allow
                     self.emit(mac,"write_permission/state","ON" if allow else "OFF")
                     self.emit(mac,"command_status",
@@ -459,7 +459,7 @@ class HomeAssistantMQTT:
     def _parameter_command(self,mac:str,key:str,payload:bytes)->None:
         p=BY_KEY.get(key)
         if p is None:return
-        if not self.cfg.get("allow_temperature_control",False) or not self.permission.get(mac,False):
+        if not self.permission.get(mac,False):
             self.emit(mac,"command_status","Refus : autoriser d'abord la modification des paramètres")
             return
         if self.last_data.get(mac,0)<=0 or time.monotonic()-self.last_data[mac]>70:
@@ -526,7 +526,6 @@ class HomeAssistantMQTT:
                         return
                 with self._lock:
                     if (not self.permission.get(mac,False) or
-                        not self.cfg.get("allow_temperature_control",False) or
                         time.monotonic()-self.last_data.get(mac,0)>70 or
                         time.monotonic()-self.last_confirmed.get(mac,0)>60):
                         self.emit(mac,"command_status",
