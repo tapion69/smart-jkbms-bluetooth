@@ -81,7 +81,8 @@
     "y": 160,
     "wires": [
       [
-        "d4cb3acdbe43f291"
+        "d4cb3acdbe43f291",
+        "77930ff9204bec01"
       ]
     ]
   },
@@ -110,6 +111,108 @@
     "info": "This prototype does not publish JK-BMS measurements, HA MQTT entities or write BMS settings.",
     "x": 380,
     "y": 300,
+    "wires": []
+  },
+  {
+    "id": "8b55b11b32e064ac",
+    "type": "tab",
+    "label": "JK-BMS | Trames",
+    "disabled": false,
+    "info": "0.1.4: reconstitute and CRC-validate 300-byte JK02 frames; data decoding and MQTT not yet implemented."
+  },
+  {
+    "id": "b1e8a31ca20a9361",
+    "type": "comment",
+    "z": "8b55b11b32e064ac",
+    "name": "0.1.4 – Lecture JK02 0x97 / 0x96, trames 300 octets, CRC",
+    "info": "Commandes envoyées par Python. Réassemblage et vérification du checksum dans Node-RED. Aucun réglage batterie modifié.",
+    "x": 370,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "77930ff9204bec01",
+    "type": "link out",
+    "z": "f03b52e846d017a1",
+    "name": "Vers analyse trames JK",
+    "mode": "link",
+    "links": [
+      "8f9c58b4058b143e"
+    ],
+    "x": 930,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "8f9c58b4058b143e",
+    "type": "link in",
+    "z": "8b55b11b32e064ac",
+    "name": "Notifications depuis BLE",
+    "links": [
+      "77930ff9204bec01"
+    ],
+    "x": 160,
+    "y": 160,
+    "wires": [
+      [
+        "65ad8ac512b5e001"
+      ]
+    ]
+  },
+  {
+    "id": "65ad8ac512b5e001",
+    "type": "function",
+    "z": "8b55b11b32e064ac",
+    "name": "Assemblage + contrôle CRC JK02",
+    "func": "const e = msg.payload || {};\nif (e.type === \"connected\" || e.type === \"disconnected\") {\n  if (e.address) context.set(\"rx:\" + e.address, \"\");\n  return null;\n}\nif (e.type !== \"raw_notification\" || !e.address || typeof e.hex !== \"string\") return null;\nconst address = String(e.address).toUpperCase();\nconst safeHex = e.hex.replace(/[^a-fA-F0-9]/g, \"\");\nif (safeHex.length === 0 || safeHex.length % 2) return null;\nconst fragment = Buffer.from(safeHex, \"hex\");\nlet buffer = Buffer.concat([Buffer.from(context.get(\"rx:\" + address) || \"\", \"hex\"), fragment]);\nconst signature = Buffer.from([0x55, 0xAA, 0xEB, 0x90]);\nconst valid = [], invalid = [];\nlet steps = 0;\nwhile (buffer.length >= 4 && steps++ < 24) {\n  const start = buffer.indexOf(signature);\n  if (start < 0) {\n    buffer = buffer.subarray(Math.max(0, buffer.length - 3));\n    break;\n  }\n  if (start > 0) buffer = buffer.subarray(start);\n  if (buffer.length < 300) break;\n  const frame = buffer.subarray(0, 300);\n  const checksum = frame.subarray(0, 299).reduce((sum, val) => (sum + val) & 0xFF, 0);\n  if (checksum !== frame[299] || ![1, 2, 3].includes(frame[4])) {\n    invalid.push({\n      topic: \"jk/\" + address + \"/invalid_frame\",\n      payload: {address, reason: \"invalid_header_type_or_crc\", type: frame[4],\n        computed_crc: checksum, received_crc: frame[299], preview_hex: frame.subarray(0, 24).toString(\"hex\").toUpperCase()}\n    });\n    buffer = buffer.subarray(1);\n    continue;\n  }\n  valid.push({\n    topic: \"jk/\" + address + \"/frame\",\n    payload: {address, type: frame[4], sequence: frame[5], frame_length: 300,\n      crc_ok: true, raw_hex: frame.toString(\"hex\").toUpperCase(), time: e.time}\n  });\n  buffer = buffer.subarray(300);\n}\nif (buffer.length > 350) buffer = buffer.subarray(buffer.length - 3);\ncontext.set(\"rx:\" + address, buffer.toString(\"hex\"));\nreturn [valid.length ? valid : null, invalid.length ? invalid : null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 160,
+    "wires": [
+      [
+        "5524471869b2e0af"
+      ],
+      [
+        "8d30a20107f452b3"
+      ]
+    ]
+  },
+  {
+    "id": "5524471869b2e0af",
+    "type": "debug",
+    "z": "8b55b11b32e064ac",
+    "name": "Trames JK02 valides (HEX)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 680,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "8d30a20107f452b3",
+    "type": "debug",
+    "z": "8b55b11b32e064ac",
+    "name": "Trames rejetées (CRC)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 680,
+    "y": 205,
     "wires": []
   }
 ]

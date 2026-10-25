@@ -18,6 +18,18 @@ class BleTests(unittest.TestCase):
             ["C8:47:80:1A:27:12"],
         )
 
+    def test_read_only_command_packet(self):
+        for cmd in (0x97, 0x96):
+            packet = bridge.build_read_command(cmd)
+            self.assertEqual(len(packet), 20)
+            self.assertEqual(packet[:4], bytes.fromhex("AA 55 90 EB"))
+            self.assertEqual(packet[4], cmd)
+            self.assertEqual(packet[5:19], bytes(14))
+            self.assertEqual(packet[19], sum(packet[:19]) & 255)
+        for forbidden in (0x1D, 0x1E, 0x00, 0xA1):
+            with self.assertRaises(ValueError):
+                bridge.build_read_command(forbidden)
+
     def test_scan_returns_original_ble_device(self):
         mac = "C8:47:80:1A:27:12"
         device = SimpleNamespace(name="Batterie 2-02")

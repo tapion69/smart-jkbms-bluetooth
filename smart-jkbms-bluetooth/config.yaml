@@ -1,5 +1,5 @@
 name: Smart JK-BMS Bluetooth (Development)
-version: "0.1.3"
+version: "0.1.4"
 slug: smart_jkbms_ble
 description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
 startup: services
@@ -23,6 +23,7 @@ options:
   scan_all_devices: false
   bms_addresses: ""
   connection_probe_seconds: 15
+  read_only_requests: true
   debug_mode: true
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
@@ -31,4 +32,5 @@ schema:
   scan_all_devices: bool
   bms_addresses: str?
   connection_probe_seconds: int(5,60)
+  read_only_requests: bool
   debug_mode: bool

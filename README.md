@@ -1,22 +1,22 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.3. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.4. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.0 development milestone
+## Included in v0.1.4 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
 - BLE discovery on the host adapter, optionally including all nearby devices.
 - Read-only Bluetooth connection probes use BLEDevice objects retained from discovery; absent configured BMS addresses are skipped until the next scan.
-- BLE service discovery and raw FFE1 notifications, if provided by the device.
+- Detect separate FFE1 write and notify handles; send only documented JK02 read requests `0x97` and `0x96` (optional), then stream raw BLE notifications to Node-RED.
 - Python-to-Node-RED local HTTP bridge protected by a random per-installation token.
 - A visual Node-RED tab: **Bluetooth | Diagnostics**.
 - Persistent Node-RED flows loaded from `/data/node-red/flows.json` (not `/addon/flows.json`); user modifications are retained on restart.
 - Home Assistant options translated into French and English.
 
-**Not yet implemented:** JK02 read polling commands, verified BMS frame assembly, cell voltages, temperature, current, SOC, MQTT Discovery, dashboards, and BMS parameter changes. No BMS write commands are sent in this milestone.
+**Not yet implemented:** validated cell measurements/SOC/temperature/current, MQTT Discovery, dashboards or BMS parameter changes. The only commands sent by this build are JK02 **read requests** `0x97` and `0x96`; no BMS configuration writes.
 
 ## Installation
 
@@ -39,7 +39,7 @@ BatMON or the official JK app may already be connected to a BMS. Disconnect thei
 - **scan_duration_seconds**: duration of discovery.
 - **scan_all_devices**: show all advertisements instead of only JK/BMS names.
 - **bms_addresses**: comma-separated BLE MAC addresses; blank means scanning only.
-- **connection_probe_seconds**: how long to listen for unsolicited FFE1 notifications.
+- **connection_probe_seconds**: how long to listen to BLE notifications after initial requests.\n- **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
 - **Node-RED access**: account `pi`, bcrypt password hash set in `settings.js` (same hash as Smart Voltronic); no credential fields in the add-on configuration.
 
 Known limitation: Some JK-BMS implementations only transmit telemetry after they receive protocol-specific read commands. In those cases a connection can succeed without any raw notifications. This is expected in v0.1.3.
@@ -79,7 +79,7 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
 
 ## Development plan
 
-- 0.1.3: Avoid redundant BLE scans when connecting, report absent configured BMS devices and retry on the next cycle.
+- 0.1.4: send JK02 0x97 and 0x96 read-only requests and report separate FFE1 characteristic properties, while retaining v0.1.3 scan improvements.
 - Later: validated JK-BMS read commands, framed responses, verified measurements.
 - Later: MQTT Discovery and battery diagnostics; optional dashboard integration.
 

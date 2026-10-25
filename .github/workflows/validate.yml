@@ -29,3 +29,5 @@ jobs:
 
       - name: BLE unit tests without hardware
         run: python -m unittest discover -s tests -v
+      - name: Node-RED frame assembly checks
+        run: node tests/test_frame_assembler.js

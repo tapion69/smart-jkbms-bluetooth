@@ -19,10 +19,9 @@ for secret_file in /data/.nodered_credential_secret /data/.ble_bridge_token; do
 done
 export BLE_BRIDGE_TOKEN="$(cat /data/.ble_bridge_token)"
 
-if [[ ! -f "$WORKDIR/flows.json" ]]; then
-  cp /addon/flows.json "$WORKDIR/flows.json"
-  echo "[INFO] Initial Node-RED diagnostic flow installed"
-fi
+# Merge new vendor nodes without overwriting existing user flows.
+# A backup is made whenever an update adds nodes or a link.
+ /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json
 
 # User flows are never overwritten on startup or update.
 export NODE_PATH="$(npm root -g)"

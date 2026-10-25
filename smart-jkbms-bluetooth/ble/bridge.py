@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.3.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.4.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -24,6 +24,20 @@ from bleak.exc import BleakDeviceNotFoundError
 LOG = logging.getLogger("smart_jkbms_ble")
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
 MAC_PATTERN = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
+JK_READ_COMMANDS = (0x97, 0x96)
+JK_WRITE_HEADER = bytes.fromhex("AA 55 90 EB")
+
+
+def build_read_command(command: int) -> bytes:
+    """Build only documented 20-byte JK02 read requests, with sum8 CRC."""
+    if command not in JK_READ_COMMANDS:
+        raise ValueError("Command is not an approved read-only JK02 request")
+    frame = bytearray(20)
+    frame[0:4] = JK_WRITE_HEADER
+    frame[4] = command
+    frame[19] = sum(frame[:19]) & 0xFF
+    return bytes(frame)
+
 
 
 def emit(event_type: str, **data: Any) -> bool:
@@ -45,7 +59,8 @@ def emit(event_type: str, **data: Any) -> bool:
             if response.status not in (200, 202, 204):
                 LOG.warning("Node-RED bridge response status: %d", response.status)
                 return False
-        LOG.info("BLE event: %s", json.dumps(event, ensure_ascii=False))
+        if event_type not in {"raw_notification", "unrecognized_at"}:
+            LOG.info("BLE event: %s", json.dumps(event, ensure_ascii=False))
         return True
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         if event_type != "bridge_start":
@@ -127,17 +142,27 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
         async with BleakClient(device, timeout=15, **kwargs) as client:
             services = list(client.services)
             characteristics = [c for s in services for c in s.characteristics]
-            chosen = next(
-                (c for c in characteristics if c.uuid.lower() == FFE1 and "notify" in c.properties),
-                None,
+            notify_char = next(
+                (c for c in characteristics if c.uuid.lower() == FFE1 and "notify" in c.properties), None
+            )
+            write_char = next(
+                (
+                    c for c in characteristics
+                    if c.uuid.lower() == FFE1
+                    and ("write-without-response" in c.properties or "write" in c.properties)
+                ), None
             )
             await forward(
-                "connected",
-                address=address,
+                "connected", address=address,
                 services=[str(s.uuid) for s in services],
-                notify_characteristic=FFE1 if chosen is not None else None,
+                ffe1_characteristics=[
+                    {"handle": c.handle, "properties": sorted(c.properties)}
+                    for c in characteristics if c.uuid.lower() == FFE1
+                ],
+                notify_characteristic=FFE1 if notify_char else None,
+                write_characteristic=FFE1 if write_char else None
             )
-            if chosen is None:
+            if notify_char is None:
                 await forward("notify_unavailable", address=address)
                 await asyncio.sleep(min(listen, 5))
                 return
@@ -174,9 +199,26 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
                     )
                 )
 
-            await client.start_notify(chosen, on_notification)
+            await client.start_notify(notify_char, on_notification)
+            if bool(cfg.get("read_only_requests", True)):
+                if write_char is None:
+                    await forward("read_unavailable", address=address,
+                                  message="FFE1 write characteristic not found")
+                else:
+                    response = "write-without-response" not in write_char.properties
+                    for command in JK_READ_COMMANDS:
+                        packet = build_read_command(command)
+                        await client.write_gatt_char(write_char, packet, response=response)
+                        await forward(
+                            "read_request_sent", address=address,
+                            command=f"0x{command:02X}", handle=write_char.handle,
+                            frame_hex=packet.hex(" ").upper()
+                        )
+                        await asyncio.sleep(0.6)
+            else:
+                await forward("read_requests_disabled", address=address)
             await asyncio.sleep(listen)
-            await client.stop_notify(chosen)
+            await client.stop_notify(notify_char)
     except BleakDeviceNotFoundError as exc:
         LOG.warning("Discovered BLE device disappeared before connection: %s", address)
         await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}", retry_on_next_scan=True)
@@ -191,7 +233,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.3", note="read_only_discovery_and_connection_probe"
+        "bridge_start", version="0.1.4", note="read_only_JK02_protocol_requests"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
