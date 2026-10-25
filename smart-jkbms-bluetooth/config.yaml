@@ -1,5 +1,5 @@
 name: Smart JK-BMS Bluetooth (Development)
-version: "0.2.8"
+version: "0.3.0"
 slug: smart_jkbms_ble
 description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
 startup: services
@@ -24,8 +24,6 @@ options:
   bms_addresses: ""
   connection_probe_seconds: 15
   persistent_connections: true
-  read_only_requests: true
-  allow_temperature_control: false
   adapter_reset_on_start: false
   mqtt_enabled: true
   mqtt_host: core-mosquitto
@@ -35,6 +33,7 @@ options:
   mqtt_topic_prefix: smart_jkbms_ble
   mqtt_discovery_prefix: homeassistant
   debug_mode: true
+  send_bip: true
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
   scan_interval_seconds: int(20,300)
@@ -43,8 +42,6 @@ schema:
   bms_addresses: str?
   connection_probe_seconds: int(5,60)
   persistent_connections: bool
-  read_only_requests: bool
-  allow_temperature_control: bool
   adapter_reset_on_start: bool
   mqtt_enabled: bool
   mqtt_host: str
@@ -54,3 +51,4 @@ schema:
   mqtt_topic_prefix: str
   mqtt_discovery_prefix: str
   debug_mode: bool
+  send_bip: bool
