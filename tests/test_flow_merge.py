@@ -165,6 +165,40 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_upgrade_exact_stock_functions_v0111_and_preserve_custom_code(self):
+        fixtures = ROOT / "tests" / "fixtures" / "stock_functions_0111.json"
+        sources = (
+            PACKAGED,
+            DECODER,
+            ROOT / "smart-jkbms-bluetooth" / "summary_flows.json",
+            ROOT / "smart-jkbms-bluetooth" / "health_flows.json",
+            ROOT / "smart-jkbms-bluetooth" / "short_diagnostics_flows.json",
+        )
+        legacy = json.loads(fixtures.read_text(encoding="utf-8"))
+        original = [node for source in sources for node in json.loads(source.read_text())]
+        for node in original:
+            if node["id"] in legacy:
+                node["func"] = legacy[node["id"]]
+        custom = {"id":"user_flow","type":"function","name":"User function","func":"return msg;","z":"b150100000000001","wires":[[]]}
+        original.append(custom)
+        # Simulate the user having customized the summary function; NEVER replace it.
+        customized_summary = next(n for n in original if n["id"]=="f5500ba6100a0001")
+        customized_summary["func"]+="\n// CUSTOM USER EDIT"
+        with tempfile.TemporaryDirectory() as td:
+            installed=Path(td)/"flows.json"
+            installed.write_text(json.dumps(original))
+            mod.merge(installed, *sources)
+            result={n["id"]:n for n in json.loads(installed.read_text())}
+            latest={n["id"]:n for s in sources for n in json.loads(s.read_text())}
+            self.assertEqual(result["b150100000000004"]["func"],latest["b150100000000004"]["func"])
+            self.assertEqual(result["b111a90000000002"]["func"],latest["b111a90000000002"]["func"])
+            self.assertEqual(result["f5500ba6100a0001"]["func"],
+                             customized_summary["func"])
+            self.assertEqual(result[custom["id"]],custom)
+            self.assertEqual(mod.merge(installed,*sources),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()

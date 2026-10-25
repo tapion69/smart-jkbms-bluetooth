@@ -15,6 +15,54 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# Published *unmodified* v0.1.11 vendor functions only. This is a conservative
+# one-time upgrade for a bug in temperature validation. Never replace any
+# user-modified Function, including nodes whose IDs happen to be unchanged.
+STOCK_FUNCTIONS_0111 = {
+    "b150100000000004": (2963, "a14e767badfd813c"),
+    "f5500ba6100a0001": (1301, "4f0f9790d60cea4f"),
+    "b111a90000000002": (3500, "dd5173ca8290ccef"),
+}
+
+
+def legacy_fingerprint(source: str) -> str:
+    # 64-bit FNV-1a over unicode code units; current reference functions are
+    # BMP-only. Paired with exact length + unchanged vendor ID/name/type.
+    value = 0xCBF29CE484222325
+    for character in source:
+        value = ((value ^ ord(character)) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+
+def update_stock_functions(
+    current_by_id: dict, packaged_by_id: dict
+) -> int:
+    updated = 0
+    for node_id, (length, fingerprint) in STOCK_FUNCTIONS_0111.items():
+        installed = current_by_id.get(node_id)
+        packaged = packaged_by_id.get(node_id)
+        if not isinstance(installed, dict) or not isinstance(packaged, dict):
+            continue
+        if installed.get("type") != "function" or packaged.get("type") != "function":
+            continue
+        if installed.get("name") != packaged.get("name"):
+            print(f"[WARN] Preserving renamed custom Node-RED function {node_id}")
+            continue
+        before = installed.get("func")
+        if not isinstance(before, str):
+            continue
+        desired = packaged.get("func")
+        if before == desired:
+            continue
+        if len(before) == length and legacy_fingerprint(before) == fingerprint:
+            installed["func"] = desired
+            updated += 1
+        else:
+            print(f"[WARN] Preserving modified Node-RED function {node_id}; update it manually")
+    return updated
+
+
+
 def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     base = []
     for source in (packaged, *extra_packages):
@@ -38,8 +86,10 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     if not isinstance(current, list):
         raise ValueError("User flows must be a JSON array")
     by_id = {n.get("id"): n for n in current if isinstance(n, dict)}
+    packaged_by_id = {n.get("id"): n for n in base if isinstance(n, dict)}
     additions = [n for n in base if n["id"] not in by_id]
-    changed = bool(additions)
+    updated_functions = update_stock_functions(by_id, packaged_by_id)
+    changed = bool(additions or updated_functions)
 
     # Append vendor links only; never replace custom source nodes or wires.
     links = (
@@ -106,7 +156,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         os.replace(tmp, installed)
     finally:
         tmp.unlink(missing_ok=True)
-    print(f"[INFO] Node-RED vendor flows merged: {len(additions)} nodes, {disabled} noisy Debug nodes disabled, backup {backup.name}")
+    print(f"[INFO] Node-RED vendor flows merged: {len(additions)} nodes, {disabled} noisy Debug nodes disabled, {updated_functions} stock functions upgraded, backup {backup.name}")
     return len(additions)
 
 

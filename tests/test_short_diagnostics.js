@@ -33,6 +33,12 @@ assert(lines.some(s=>s.includes("1A:EF")&&s.includes("DÉCODAGE REJETÉ")));
 assert(lines.some(s=>s.includes("1A:EF 24S REJET : cellules 0/24")));
 assert(lines.some(s=>s.includes("1A:EF 32S REJET : cellules 0/32")));
 assert(lines.some(s=>s.includes("27:12")&&s.includes("MESURES OK")));
+assert.equal(run({address:mac2,validation:"provisional_compare_with_BatMON",
+ source_crc_ok:true,format:"JK02_32S",voltage_v:51.2,soc_pct:21,
+ invalid_temperature_channels:["MOS"]}),null);
+const warningLines=run("short_tick")[0].map(x=>x.payload);
+assert(warningLines.some(x=>x.includes("27:12")&&x.includes("TEMP MOS INVALIDE")),
+ "Diagnostic must display probe failure even when pack decodes");
 for(const l of lines)assert(l.length<=95,"too long: "+l);
 const baseNodes=[
 ...JSON.parse(fs.readFileSync(path.join(base,"flows.json"),"utf8")),

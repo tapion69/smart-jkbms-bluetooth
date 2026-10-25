@@ -51,6 +51,38 @@ for(const format of ["JK02_24S","JK02_32S"]){
  assert.equal(p.validation,"provisional_compare_with_BatMON");
  assert.equal(p.cycles,21);
 }
+// BMS 1: JK02_32S electrical data is valid, but one temperature probe
+// reports an out-of-range sentinel. Do not suppress the whole battery.
+for (const [index, key, label] of [[0,"temp1_c","T1"],[1,"temp2_c","T2"],[2,"mos_temp_c","MOS"]]){
+ const faulty=sample("JK02_32S");
+ faulty.writeInt16LE(32767,[162,164,144][index]);
+ faulty[299]=faulty.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+ const decoded=run(faulty);
+ assert(decoded&&decoded[0],"One invalid "+label+" must not reject sound pack readings");
+ const p=decoded[0].payload;
+ assert.equal(p.format,"JK02_32S");
+ assert.equal(p.cell_count,16);
+ assert.equal(p.soc_pct,76);
+ assert.equal(p[key],null,"Invalid channel must not appear as 0°C");
+ assert.equal(p.temperature_quality,"partial_unverified");
+ assert.deepEqual(p.invalid_temperature_channels,[label]);
+ assert.equal(p.invalid_temperature_raw_tenths[label],32767);
+ for (const [other,name] of [["temp1_c","T1"],["temp2_c","T2"],["mos_temp_c","MOS"]]){
+   if(name!==label)assert(Number.isFinite(p[other]));
+ }
+}
+const twoFaulty=sample("JK02_32S");
+twoFaulty.writeInt16LE(32767,162);
+twoFaulty.writeInt16LE(32767,144);
+twoFaulty[299]=twoFaulty.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+const unsafe=run(twoFaulty);
+assert(!unsafe || !unsafe[0],"Two implausible probes remain rejected");
+const badCells=sample("JK02_32S");
+badCells.writeUInt16LE(9000,6);
+badCells[299]=badCells.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+const invalidElectrical=run(badCells);
+assert(!invalidElectrical || !invalidElectrical[0],"Unsafe electrical data stays rejected");
+
 const empty=Buffer.alloc(300);empty.set([0x55,0xAA,0xEB,0x90,2,9]);empty[299]=empty.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
 const rejected=run(empty);assert.equal(rejected[0],null);assert.equal(rejected[1].payload.reason,"no_plausible_profile");
 const invalid=sample("JK02_32S");invalid[299]^=0xff;

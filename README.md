@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.11. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.12. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.11 development milestone
+## Included in v0.1.12 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -141,3 +141,11 @@ The old verbose **ÉTAT BMS 1 + BMS 2 (20 s)** Debug output was truncated in the
 The old verbose Debug is automatically turned off on upgrade when its stock ID/name still match; customized or renamed user nodes are left alone. Existing custom flow nodes and wires remain in place, and `merge_flows.py` backs up the installed flow. A clean installation includes vendor links from BLE events, assembled valid frames and verified decoded measurements to the new compact function.
 
 To troubleshoot, send the **three short output lines** for `BMS 1A:EF` from this new Debug. The 24S and 32S rejection lines identify which data-field interpretation fails before changing any decoder checks.
+
+## JK02 temperature probe resilience (v0.1.12)
+
+Two independently connected BMSs both delivered checksum-valid 300-byte JK02 type-0x02 frames. BMS 2 decoded reliably with format JK02_32S, but BMS 1 was rejected **solely** because one reported temperature was outside the existing plausible -80°C..160°C range. The 24S interpretation has zero enabled cells and is not the correct protocol layout for BMS 1. This release keeps full validation of the battery pack voltage, current, SOC, enabled cells, sum of cell voltages, CRC, and supported JK02 format. It accepts an otherwise valid frame when **at most one of its three standard temperature channels** is implausible, marks that channel **null** (never zero or a fabricated reading), and attaches `temperature_quality=partial_unverified`, `invalid_temperature_channels`, and raw signed tenths of degrees for follow-up. A second invalid temperature still causes the frame to be rejected.
+
+The per-BMS Debug at ten seconds explicitly displays `TEMP T1/T2/MOS INVALIDE` near the SOC and `T1/T2/MOS N/D` for unavailable channels, rather than silently dropping other safe diagnostic measurements. The 20-second compact diagnostic also displays this warning. These readings are **experimental**: compare BMS 1 voltage, current, SOC, cells, and valid temperatures with BatMON, and investigate the suspect probe before considering alarms or Home Assistant publishing. No MQTT is added; **never** use a missing temperature for battery safety interlocks. `JK02_32S` refers to the wire format rather than the physically installed cell count. Offsets are cross-checked with syssi/esphome-jk-bms' BLE frame documentation and implementation; code remains original.
+
+**Upgrade safety**: The Node-RED merger patches only exactly fingerprint-matching, *unmodified* stock Function nodes from v0.1.11 (decoder, summary and short diagnostic). It makes a timestamped backup. If a user customized a Function, it remains untouched and the merge prints a warning instead of overwriting it. All custom nodes and wires are preserved.
