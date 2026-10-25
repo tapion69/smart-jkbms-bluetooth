@@ -185,12 +185,14 @@ class MQTTTests(unittest.TestCase):
             ("battery_type","LiFePO4"),("detail_log_count",29),
             ("discharge_ocp_release_s",7),("overvoltage_release_s",12),
             ("total_runtime_formatted","0j 01h 16m"),
-            ("charger_connected",True),("pcl_module_active",False),
+            ("charger_connected",True),
         ):
             self.assertEqual(state.get(key),value,key)
         conf={topic:json.loads(value) for topic,value,_,_
               in c.published if topic.endswith("/config") and value}
         base=m.discovery+"/"+ "binary_sensor/"+short_id(A)+"_"
+        self.assertNotIn("pcl_module_active",state)
+        self.assertNotIn("dry_contact_mask",state)
         self.assertEqual(conf[base+"dry1_contact/config"]["name"],"DRY1 contact")
         self.assertEqual(conf[base+"dry2_contact/config"]["name"],"DRY2 contact")
         self.assertEqual(conf[base+"online_status/config"]["state_topic"],
@@ -235,7 +237,8 @@ class MQTTTests(unittest.TestCase):
         self.assertEqual(state["device_name"],"Batterie1")
         self.assertEqual(state["power_on_count"],93)
         self.assertEqual(state["uart2_enabled"],True)
-        self.assertEqual(state["lcd_buzzer_trigger_id"],3)
+        self.assertEqual(m.info[A]["lcd_buzzer_trigger_id"],3)
+        self.assertNotIn("lcd_buzzer_trigger_id",state)
         all_public=" ".join(str(x[1]) for x in c.published)
         for secret in ("TOPSECRET!","PRIVATEUSER","ADMIN_PASS"):
             self.assertNotIn(secret,all_public)
