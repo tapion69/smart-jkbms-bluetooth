@@ -59,7 +59,7 @@ def sample_data(address=A,all_sensors_missing=False):
 
 
 def settings_frame():
-    f=bytearray(300);f[:5]=bytes.fromhex("AA EB 90 01")
+    f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 01")
     f[10:14]=(2800).to_bytes(4,"little")
     f[18:22]=(3650).to_bytes(4,"little")
     f[138:142]=(3400).to_bytes(4,"little")
@@ -106,7 +106,7 @@ class MQTTTests(unittest.TestCase):
         ]:
             seconds=53293405
             frame=bytearray(300)
-            frame[:5]=bytes.fromhex("AA EB 90 02")
+            frame[:5]=bytes.fromhex("55 AA EB 90 02")
             frame[5]=27
             frame[offset:offset+4]=seconds.to_bytes(4,"little")
             frame[299]=sum(frame[:299])&255
@@ -209,7 +209,7 @@ class MQTTTests(unittest.TestCase):
 
     def test_device_info_never_publishes_passwords(self):
         m,c=self.instance()
-        f=bytearray(300);f[:5]=bytes.fromhex("AA EB 90 03")
+        f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 03")
         f[6:6+3]=b"JK-";f[22:25]=b"2.0";f[30:35]=b"19.0a"
         f[62:71]=b"SECRETPIN"
         f[118:128]=b"SETUP_PASS"
@@ -274,7 +274,7 @@ class MQTTTests(unittest.TestCase):
 
     def test_v023_device_information_readonly_and_no_passcode_leak(self):
         m,c=self.instance()
-        f=bytearray(300);f[:5]=bytes.fromhex("AA EB 90 03")
+        f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 03")
         f[6:17]=b"JK_PB2A16S1"
         f[22:26]=b"14XA";f[30:35]=b"19.0b"
         f[38:42]=(3600).to_bytes(4,"little")
@@ -554,7 +554,7 @@ class MQTTTests(unittest.TestCase):
         self.assertTrue(m.ingest(data))
         self.assertTrue(m.ingest({"kind":"frame","address":A,"frame_type":1,
                                   "raw_hex":settings_frame()}))
-        f=bytearray(300);f[:5]=bytes.fromhex("AA EB 90 03")
+        f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 03")
         f[6:17]=b"JK-PB2A16S1";f[22:26]=b"14XA"
         f[30:35]=b"19.0b";f[46:55]=b"BMS Alpha"
         f[78:84]=b"231118";f[86:97]=b"30925721340"
