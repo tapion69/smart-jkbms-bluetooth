@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.8.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.9.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -19,7 +19,7 @@ from typing import Any
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
-from bleak.exc import BleakDeviceNotFoundError
+from bleak.exc import BleakDBusError, BleakDeviceNotFoundError
 
 from control import ControlService, temperature_control_frame
 from parameters import build_write
@@ -442,6 +442,19 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                 await client.stop_notify(notify_char)
             return
 
+    except BleakDBusError as exc:
+        if (exc.dbus_error == "org.bluez.Error.NotPermitted"
+                and "Notify acquired" in str(exc.dbus_error_details or "")):
+            LOG.warning("FFE1 notification access reserved for %s by another BlueZ client; "
+                        "stop the competing integration or release its BLE connection", address)
+            await forward("notification_reserved", address=address,
+                          characteristic=FFE1,
+                          note="Notify acquired: another BlueZ client holds exclusive FFE1 notifications",
+                          action="stop_other_BLE_reader_then_retry")
+        else:
+            LOG.exception("BLE connection probe failed for %s", address)
+            await forward("connection_error", address=address,
+                          error=f"{type(exc).__name__}: {exc}")
     except BleakDeviceNotFoundError as exc:
         LOG.warning("Discovered BLE device disappeared before connection: %s", address)
         await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}", retry_on_next_scan=True)
@@ -509,6 +522,19 @@ def bluez_cached_connected(
         matches[address] = BLEDevice(
             address, name, {"path": path, "props": props}
         )
+    # A cached BlueZ connection may be owned by another process that has
+    # exclusive access to FFE1 via AcquireNotify. Checking this property
+    # prevents reconnecting/disconnecting that process's shared link.
+    for char_path, interfaces in managed.items():
+        props_map = interfaces.get("org.bluez.GattCharacteristic1", {})
+        if not props_map:
+            continue
+        props = {k: getattr(v, "value", v) for k, v in props_map.items()}
+        if str(props.get("UUID", "")).lower() != FFE1 or props.get("NotifyAcquired") is not True:
+            continue
+        for device in matches.values():
+            if char_path.startswith(device.details["path"] + "/"):
+                device.details["notify_acquired"] = True
     return matches
 
 
@@ -535,7 +561,13 @@ async def find_bluez_connected(
         )
         matched = bluez_cached_connected(objects, adapter, wanted)
         for address in wanted:
-            if address in matched:
+            if address in matched and matched[address].details.get("notify_acquired"):
+                await forward(
+                    "notification_reserved", address=address, adapter=adapter,
+                    characteristic=FFE1,
+                    note="FFE1 AcquireNotify already held by another BlueZ client; waiting without disconnecting the device",
+                )
+            elif address in matched:
                 await forward(
                     "bluez_connected_recovered",
                     address=address,
@@ -606,6 +638,14 @@ async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
                 # the BMS from advertising. Try its existing BlueZ GATT object
                 # before trying further BLE advertising scans.
                 cached = await find_bluez_connected(cfg, eligible)
+                # The foreign AcquireNotify owner must release FFE1. Scanning,
+                # reconnecting or resetting hci0 cannot safely steal the lock.
+                reserved = {mac for mac, device in cached.items()
+                            if device.details.get("notify_acquired")}
+                for mac in reserved:
+                    retry_at[mac] = time.monotonic() + 60
+                    cached.pop(mac)
+                eligible = [mac for mac in eligible if mac not in reserved]
                 need_scan = [a for a in eligible if a not in cached]
                 found = await scan(cfg) if (need_scan or not configured) else {}
                 found.update(cached)
@@ -660,7 +700,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.2.8", note="JK02_clean_MQTT_labels_cell_pairs_and_voltage_precision"
+        "bridge_start", version="0.2.9", note="JK02_BlueZ_FFE1_notify_ownership_diagnostics"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
