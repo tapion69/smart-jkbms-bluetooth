@@ -1,0 +1,48 @@
+[
+  {
+    "id": "f5500ba6100a0003",
+    "type": "comment",
+    "z": "b150100000000001",
+    "name": "0.1.7 – Résumé lisible / 10 s / batterie",
+    "info": "Sortie unique en texte : tension, courant, puissance, SOC, cellules, delta, températures. Toujours provisoire tant que BatMON n'a pas confirmé les chiffres.",
+    "x": 390,
+    "y": 305,
+    "wires": []
+  },
+  {
+    "id": "f5500ba6100a0001",
+    "type": "function",
+    "z": "b150100000000001",
+    "name": "Résumé lisible (10s / BMS)",
+    "func": "// Résumé ultra-lisible toutes les 10 s PAR BMS. Aucun MQTT.\nconst d=msg.payload || {};\nconst address=String(d.address || \"\").toUpperCase();\nif (!address || d.validation!==\"provisional_compare_with_BatMON\") return null;\nconst fields=[\"voltage_v\",\"current_a\",\"power_w\",\"soc_pct\",\"cell_count\",\"cell_delta_mv\"];\nif (fields.some(k=>!Number.isFinite(Number(d[k])))) return null;\nconst now=Date.now(),key=\"last_summary:\"+address;\nconst last=context.get(key) || 0;\nif (now-last<10000) return null;\ncontext.set(key,now);\nfunction number(v,dec){return Number(v).toFixed(dec);}\nconst temps=[[\"T1\",d.temp1_c],[\"T2\",d.temp2_c],[\"MOS\",d.mos_temp_c]]\n  .filter(x=>Number.isFinite(Number(x[1])))\n  .map(x=>x[0]+\" \"+number(x[1],1)+\"°C\");\nconst shortAddress=address.split(\":\").slice(-2).join(\":\");\nconst amperes=Number(d.current_a);\nconst watts=Number(d.power_w);\nconst summary=[\n  \"BMS \"+shortAddress,\n  number(d.voltage_v,2)+\" V\",\n  (amperes>0?\"+\":\"\")+number(amperes,2)+\" A\",\n  (watts>0?\"+\":\"\")+number(watts,0)+\" W\",\n  \"SOC \"+number(d.soc_pct,0)+\"%\",\n  number(d.cell_count,0)+\" cellules\",\n  \"Δ \"+number(d.cell_delta_mv,0)+\" mV\",\n  ...temps,\n  d.format+\" (à vérifier)\"\n].join(\" | \");\nnode.status({fill:\"green\",shape:\"dot\",text:summary.slice(0,82)});\nmsg.topic=\"jk/\"+address+\"/resume\";\nmsg.payload=summary;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 350,
+    "wires": [
+      [
+        "f5500ba6100a0002"
+      ]
+    ]
+  },
+  {
+    "id": "f5500ba6100a0002",
+    "type": "debug",
+    "z": "b150100000000001",
+    "name": "RÉSUMÉ JK-BMS (10 s) – SEUL DEBUG ACTIF",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 770,
+    "y": 350,
+    "wires": []
+  }
+]

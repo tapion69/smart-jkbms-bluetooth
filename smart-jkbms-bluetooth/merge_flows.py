@@ -45,6 +45,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     links = (
         ("136f1472850339d1", "77930ff9204bec01"),
         ("65ad8ac512b5e001", "b150100000000002"),
+        ("b150100000000004", "f5500ba6100a0001"),
     )
     packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
     for source_id, target_id in links:
@@ -64,6 +65,28 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         else:
             print(f"[WARN] User wiring was customized for {source_id}; link manually")
 
+    # Disable noisy *stock* Debug nodes only; preserve renamed/custom nodes.
+    # This intentional v0.1.7 migration simplifies the Debug sidebar for users.
+    noisy_defaults = {
+        "d4cb3acdbe43f291": "BLE raw and diagnostics",
+        "5524471869b2e0af": "Trames JK02 valides (HEX)",
+        "8d30a20107f452b3": "Trames rejetées (CRC)",
+        "b150100000000006": "Mesures batterie (à confirmer)",
+        "b150100000000007": "Profil inconnu : raw_hex à envoyer",
+    }
+    disabled = 0
+    for node_id, expected_name in noisy_defaults.items():
+        item = by_id.get(node_id)
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "debug"
+            and item.get("name") == expected_name
+            and item.get("active") is True
+        ):
+            item["active"] = False
+            disabled += 1
+            changed = True
+
     if not changed:
         return 0
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -76,7 +99,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         os.replace(tmp, installed)
     finally:
         tmp.unlink(missing_ok=True)
-    print(f"[INFO] Node-RED vendor flows merged: {len(additions)} nodes, backup {backup.name}")
+    print(f"[INFO] Node-RED vendor flows merged: {len(additions)} nodes, {disabled} noisy Debug nodes disabled, backup {backup.name}")
     return len(additions)
 
 

@@ -60,7 +60,8 @@
     "y": 155,
     "wires": [
       [
-        "b150100000000005"
+        "b150100000000005",
+        "f5500ba6100a0001"
       ],
       [
         "b150100000000007"
@@ -91,7 +92,7 @@
     "type": "debug",
     "z": "b150100000000001",
     "name": "Mesures batterie (à confirmer)",
-    "active": true,
+    "active": false,
     "tosidebar": true,
     "console": false,
     "tostatus": false,
@@ -108,7 +109,7 @@
     "type": "debug",
     "z": "b150100000000001",
     "name": "Profil inconnu : raw_hex à envoyer",
-    "active": true,
+    "active": false,
     "tosidebar": true,
     "console": false,
     "tostatus": false,

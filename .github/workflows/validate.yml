@@ -33,3 +33,5 @@ jobs:
         run: node tests/test_frame_assembler.js
       - name: JK02 decoder checks
         run: node tests/test_jk_decoder.js
+      - name: Quiet summary Debug checks
+        run: node tests/test_quiet_summary.js

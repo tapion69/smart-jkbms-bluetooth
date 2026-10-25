@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.6. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.7. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.6 development milestone
+## Included in v0.1.7 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -104,3 +104,9 @@ When a configured BMS is absent from the first BLE scan, the add-on first reads 
 ### Optional one-time adapter power cycle
 
 To diagnose a stuck adapter, choose the correct `bluetooth_adapter` (for example `hci0`) and explicitly enable `adapter_reset_on_start`. Restart **this add-on once** to test it, then switch this option back off. The D-Bus reset briefly powers down the host adapter, disrupting every HA Bluetooth device sharing it. It requires host privileges that may not be available. The add-on never repeats a power-cycle during normal operation. If the JK-BMS is not advertising because BatMON or another app is connected, resetting the *PC adapter* cannot guarantee that the BMS will start advertising. This option does not provide Bluetooth pairing or encryption.
+
+## Quiet Node-RED diagnostics (v0.1.7)
+
+To avoid the Debug sidebar being overwhelmed by ~2 telemetry frames per second on each JK BMS, the following stock Debug nodes are **off by default** on new installations and are selectively switched off during an upgrade: `BLE raw and diagnostics`, `Trames JK02 valides (HEX)`, `Trames rejetées (CRC)`, `Mesures batterie (à confirmer)`, and `Profil inconnu : raw_hex à envoyer`. Their nodes and wires remain available and users can re-enable them whenever raw troubleshooting is needed. Renamed/customized nodes are left untouched.
+
+The only enabled Debug is **RÉSUMÉ JK-BMS (10 s) – SEUL DEBUG ACTIF** in the **JK-BMS | Mesures** tab. It shows one copy-friendly line per configured BMS every 10 seconds: voltage, current, power, SOC, cell count, cell delta, temperatures and inferred JK02 protocol. Values remain **provisional** pending comparison with known-good BatMON data. Migration appends only the vendor summary branch, writes a backup, and preserves all custom nodes; Bluetooth scanning and settings are unchanged.

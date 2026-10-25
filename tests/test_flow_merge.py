@@ -66,6 +66,47 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(mod.merge(dst,PACKAGED,DECODER),0)
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
+    def test_quiet_migration_keeps_custom_nodes_and_debug_settings(self):
+        summary = ROOT / "smart-jkbms-bluetooth" / "summary_flows.json"
+        previous = json.loads(PACKAGED.read_text()) + json.loads(DECODER.read_text())
+        for n in previous:
+            if n.get("type") == "debug":
+                n["active"] = True
+        custom = {"id":"custom_user_debug","type":"debug","name":"My debug","active":True,"z":"b150100000000001"}
+        previous.append(custom)
+        # Mimic a user who renamed an original vendor debug: keep their choice.
+        renamed=next(n for n in previous if n["id"]=="8d30a20107f452b3")
+        renamed["name"]="My custom CRC debug"
+        decoder=next(n for n in previous if n["id"]=="b150100000000004")
+        decoder["wires"][0]=["b150100000000005"]
+        with tempfile.TemporaryDirectory() as td:
+            dest=Path(td)/"flows.json"
+            dest.write_text(json.dumps(previous))
+            mod.merge(dest,PACKAGED,DECODER,summary)
+            nodes=json.loads(dest.read_text())
+            by_id={n["id"]:n for n in nodes}
+            self.assertTrue(by_id["custom_user_debug"]["active"])
+            self.assertTrue(by_id["8d30a20107f452b3"]["active"])
+            for ident in ["d4cb3acdbe43f291","5524471869b2e0af","b150100000000006","b150100000000007"]:
+                self.assertFalse(by_id[ident]["active"],ident)
+            self.assertIn("f5500ba6100a0001",by_id["b150100000000004"]["wires"][0])
+            self.assertIn("f5500ba6100a0002",by_id)
+            self.assertEqual(mod.merge(dest,PACKAGED,DECODER,summary),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+    def test_fresh_install_includes_quiet_summary(self):
+        summary=ROOT / "smart-jkbms-bluetooth" / "summary_flows.json"
+        with tempfile.TemporaryDirectory() as td:
+            dest=Path(td)/"flows.json"
+            mod.merge(dest,PACKAGED,DECODER,summary)
+            nodes=json.loads(dest.read_text())
+            by_id={n["id"]:n for n in nodes}
+            self.assertTrue(by_id["f5500ba6100a0002"]["active"])
+            self.assertFalse(by_id["d4cb3acdbe43f291"]["active"])
+            self.assertFalse(by_id["b150100000000006"]["active"])
+            self.assertIn("f5500ba6100a0001",by_id["b150100000000004"]["wires"][0])
+
+
 
 if __name__ == "__main__":
     unittest.main()
