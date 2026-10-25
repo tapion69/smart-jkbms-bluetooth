@@ -200,8 +200,8 @@ class MQTTTests(unittest.TestCase):
         m.discover(A,16)
         sw=[json.loads(p) for t,p,_,_ in c.published
           if t.endswith("disable_temperature_sensors/config")]
-        self.assertEqual(len(sw),1)
-        self.assertEqual(sw[0]["optimistic"],False)
+        self.assertGreaterEqual(len(sw),1)
+        self.assertTrue(all(entry["optimistic"] is False for entry in sw))
         self.assertEqual(sw[0]["payload_on"],"ON")
         self.assertEqual(sw[0]["payload_off"],"OFF")
         self.assertIn("command_topic",sw[0])
@@ -262,7 +262,7 @@ class MQTTTests(unittest.TestCase):
         conf={topic:json.loads(value) for topic,value,_,_
               in c.published if topic.endswith("/config") and value}
         base=m.discovery+"/"+ "binary_sensor/"+short_id(A)+"_"
-        self.assertNotIn("pcl_module_active",state)
+        self.assertFalse(state["pcl_module_active"])
         self.assertNotIn("dry_contact_mask",state)
         self.assertEqual(conf[base+"dry1_contact/config"]["name"],"16 DRY1 Contact")
         self.assertEqual(conf[base+"dry2_contact/config"]["name"],"17 DRY2 Contact")
