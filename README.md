@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.7. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.8. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.7 development milestone
+## Included in v0.1.8 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -39,7 +39,8 @@ BatMON or the official JK app may already be connected to a BMS. Disconnect thei
 - **scan_duration_seconds**: duration of discovery.
 - **scan_all_devices**: show all advertisements instead of only JK/BMS names.
 - **bms_addresses**: comma-separated BLE MAC addresses; blank means scanning only.
-- **connection_probe_seconds**: how long to listen to BLE notifications after initial requests.
+- **connection_probe_seconds**: listen duration (seconds) in legacy short-session mode only.
+- **persistent_connections**: enabled by default in v0.1.8. Runs one independent long-lived BlueZ/Bleak connection per configured battery instead of repeatedly disconnecting after 15 seconds. Set false to restore the v0.1.7 short-session behavior.
 - **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
 - **adapter_reset_on_start**: optional global BlueZ adapter power cycle at add-on startup; OFF by default. Requires explicitly selecting the correct hci0-hci3 adapter instead of auto. Interrupts all Home Assistant BLE devices using that adapter. Disallowed in auto mode. The add-on continues to scan if the reset fails.
 - **Node-RED access**: account `pi`, bcrypt password hash set in `settings.js` (same hash as Smart Voltronic); no credential fields in the add-on configuration.
@@ -110,3 +111,11 @@ To diagnose a stuck adapter, choose the correct `bluetooth_adapter` (for example
 To avoid the Debug sidebar being overwhelmed by ~2 telemetry frames per second on each JK BMS, the following stock Debug nodes are **off by default** on new installations and are selectively switched off during an upgrade: `BLE raw and diagnostics`, `Trames JK02 valides (HEX)`, `Trames rejetées (CRC)`, `Mesures batterie (à confirmer)`, and `Profil inconnu : raw_hex à envoyer`. Their nodes and wires remain available and users can re-enable them whenever raw troubleshooting is needed. Renamed/customized nodes are left untouched.
 
 The only enabled Debug is **RÉSUMÉ JK-BMS (10 s) – SEUL DEBUG ACTIF** in the **JK-BMS | Mesures** tab. It shows one copy-friendly line per configured BMS every 10 seconds: voltage, current, power, SOC, cell count, cell delta, temperatures and inferred JK02 protocol. Values remain **provisional** pending comparison with known-good BatMON data. Migration appends only the vendor summary branch, writes a backup, and preserves all custom nodes; Bluetooth scanning and settings are unchanged.
+
+## Independent persistent Bluetooth sessions (v0.1.8)
+
+Each configured BMS is assigned **at most one** persistent BLE session, using its MAC address as the identity. On connection, the add-on subscribes to FFE1 notifications and sends read-only JK02 `0x97` (device info) and `0x96` (settings) requests. The BMS then streams type-0x02 telemetry spontaneously, as described by the syssi protocol documentation. No BMS parameter writes, switches, or MOS commands are sent. References: https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md and the user's existing JK-BMS RS485/Node-RED architecture (health monitoring, timeouts and alarms, used for design inspiration without copying RS485 framing into BLE).
+
+The manager **does not perform BLE discovery when all configured BMS are connected**. It scans again only for missing or disconnected BMS, with independent reconnect delays of 10 to 120 seconds on repeated early failures. A BMS that reports only the non-telemetry `AT\\r\\n` messages triggers a read-only handshake refresh after 45 seconds without any actual BLE data; if still silent at 90 seconds the manager reconnects that BMS only. All active session tasks are cancelled cleanly when the add-on stops. The optional host adapter reset remains **off by default** and is never performed as part of routine reconnection.
+
+Operational state is available as Node-RED events: `session_persistent`, `stream_refresh`, `stream_stale`, `reconnect_scheduled`, `connected`, `disconnected`, and `device_not_seen`. Debug traces remain opt-in; the single summary Debug reports measurements every 10 seconds per BMS. Values remain provisional until checked against physical BMS readings. If parallel connections do not work reliably on a particular HA Bluetooth adapter, switch **persistent_connections: false** and restart the add-on.

@@ -162,5 +162,58 @@ class BleTests(unittest.TestCase):
         self.assertEqual(order, ["scan", "probe:" + b, "recover", "probe:" + a])
 
 
+
+    def test_persistent_manager_maintains_two_independent_sessions(self):
+        a="C8:47:80:1A:1A:EF"
+        b="C8:47:80:1A:27:12"
+        both={a:object(), b:object()}
+        started, stopped=[], []
+        scan=AsyncMock(return_value=both)
+        forward=AsyncMock(return_value=True)
+
+        async def hold(address,cfg,device,*,persistent=False):
+            self.assertTrue(persistent)
+            self.assertIs(device,both[address])
+            started.append(address)
+            try:
+                await asyncio.Event().wait()  # stays connected until manager stops
+            finally:
+                stopped.append(address)
+
+        async def scenario():
+            with patch.object(bridge,"scan",scan), patch.object(
+                bridge,"probe",hold
+            ), patch.object(bridge,"forward",forward), patch.object(
+                bridge,"options",lambda:{"bms_addresses":a+","+b,"scan_interval_seconds":45}
+            ):
+                with self.assertRaises(asyncio.TimeoutError):
+                    await asyncio.wait_for(bridge.persistent_sessions({}),timeout=1.6)
+
+        asyncio.run(scenario())
+        self.assertEqual(set(started),{a,b})
+        self.assertEqual(set(stopped),{a,b})
+        self.assertEqual(scan.await_count,1,"Connected batteries must not be rescanned")
+        events=[m.args[0] for m in forward.call_args_list]
+        self.assertIn("persistent_manager_start",events)
+        self.assertIn("persistent_manager_stop",events)
+
+    def test_missing_bms_does_not_prevent_healthy_persistent_worker(self):
+        a="C8:47:80:1A:1A:EF"
+        b="C8:47:80:1A:27:12"
+        started=[]
+        async def hold(address,cfg,device,*,persistent=False):
+            started.append(address)
+            await asyncio.Event().wait()
+        with patch.object(bridge,"scan",AsyncMock(return_value={b:object()})), patch.object(
+            bridge,"probe",hold
+        ),patch.object(bridge,"recover_missing_devices",AsyncMock(return_value={b:object()})),patch.object(
+            bridge,"forward",AsyncMock(return_value=True)
+        ),patch.object(bridge,"options",lambda:{"bms_addresses":a+","+b}):
+            with self.assertRaises(asyncio.TimeoutError):
+                asyncio.run(asyncio.wait_for(bridge.persistent_sessions({}),timeout=1.2))
+        self.assertIn(b,started)
+        self.assertNotIn(a,started)
+
+
 if __name__ == "__main__":
     unittest.main()

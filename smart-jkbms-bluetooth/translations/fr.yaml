@@ -17,6 +17,9 @@ configuration:
   connection_probe_seconds:
     name: Durée de connexion d'essai (secondes)
     description: Connexion Bluetooth en lecture seule, sans commande de lecture JK-BMS.
+  persistent_connections:
+    name: Connexions Bluetooth permanentes par BMS
+    description: Chaque batterie reste connectée avec reconnexion indépendante. Désactiver pour revenir aux connexions courtes de la v0.1.7.
   read_only_requests:
     name: Requêtes de lecture JK-BMS
     description: Active uniquement les requêtes 0x97 et 0x96 pour obtenir les mesures sans modifier les réglages.

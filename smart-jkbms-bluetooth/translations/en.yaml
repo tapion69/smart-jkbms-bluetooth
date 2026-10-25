@@ -17,6 +17,9 @@ configuration:
   connection_probe_seconds:
     name: Connection probe duration (seconds)
     description: Read-only Bluetooth connection without JK-BMS polling commands.
+  persistent_connections:
+    name: Persistent independent BMS Bluetooth connections
+    description: Keep each battery connected and reconnect independently. Disable for legacy short connections.
   read_only_requests:
     name: JK-BMS read-only requests
     description: Send only 0x97 and 0x96 read requests; never change BMS settings.

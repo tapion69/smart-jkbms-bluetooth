@@ -1,8 +1,8 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.6.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.8.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
-Node-RED. No BMS settings writes, polling or measurements decoding.
+Node-RED. Sends only approved 0x97/0x96 read requests. Measurement parsing is done in Node-RED.
 """
 from __future__ import annotations
 
@@ -246,13 +246,16 @@ async def recover_missing_devices(
     return found
 
 
-async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
+async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persistent: bool = False) -> None:
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     listen = int(cfg.get("connection_probe_seconds", 15))
     await forward("connection_start", address=address)
     try:
         kwargs = scan_kwargs(adapter)
-        # Talks to host BlueZ over D-Bus; does not take control of the HCI adapter.
+        link_lost = asyncio.Event()
+        if persistent:
+            kwargs["disconnected_callback"] = lambda _client: link_lost.set()
+        # Uses host BlueZ; this add-on never automatically power-cycles its adapter.
         async with BleakClient(device, timeout=15, **kwargs) as client:
             services = list(client.services)
             characteristics = [c for s in services for c in s.characteristics]
@@ -282,6 +285,7 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
                 return
 
             at_notifications = {"last_report": 0.0, "count": 0}
+            stream = {"last_data": time.monotonic(), "refresh_sent": False}
 
             def on_notification(_characteristic: Any, data: bytearray) -> None:
                 # BLE notifications can be fragments, not complete JK frames.
@@ -303,6 +307,8 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
                         )
                     )
                     return
+                stream["last_data"] = time.monotonic()
+                stream["refresh_sent"] = False
                 asyncio.create_task(
                     forward(
                         "raw_notification",
@@ -314,25 +320,55 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
                 )
 
             await client.start_notify(notify_char, on_notification)
-            if bool(cfg.get("read_only_requests", True)):
+
+            async def send_read_handshake(reason: str) -> None:
+                # Per syssi/JK02: 0x97 requests device info, 0x96 settings;
+                # frame 0x02 is then sent automatically. Never alter BMS settings.
+                if not bool(cfg.get("read_only_requests", True)):
+                    await forward("read_requests_disabled", address=address)
+                    return
                 if write_char is None:
                     await forward("read_unavailable", address=address,
                                   message="FFE1 write characteristic not found")
-                else:
-                    response = "write-without-response" not in write_char.properties
-                    for command in JK_READ_COMMANDS:
-                        packet = build_read_command(command)
-                        await client.write_gatt_char(write_char, packet, response=response)
-                        await forward(
-                            "read_request_sent", address=address,
-                            command=f"0x{command:02X}", handle=write_char.handle,
-                            frame_hex=packet.hex(" ").upper()
-                        )
-                        await asyncio.sleep(0.6)
+                    return
+                response = "write-without-response" not in write_char.properties
+                for command in JK_READ_COMMANDS:
+                    packet = build_read_command(command)
+                    await client.write_gatt_char(write_char, packet, response=response)
+                    await forward(
+                        "read_request_sent", address=address,
+                        command=f"0x{command:02X}", handle=write_char.handle,
+                        frame_hex=packet.hex(" ").upper(), reason=reason
+                    )
+                    await asyncio.sleep(0.6)
+
+            await send_read_handshake("initial")
+            if persistent:
+                await forward("session_persistent", address=address)
+                while client.is_connected and not link_lost.is_set():
+                    # AT/CRLF heartbeats alone are not proof of telemetry.
+                    age = time.monotonic() - stream["last_data"]
+                    if age > 90:
+                        await forward("stream_stale", address=address,
+                                      no_data_seconds=round(age),
+                                      action="reconnect_this_BMS_only")
+                        break
+                    if (
+                        age > 45 and not stream["refresh_sent"]
+                        and bool(cfg.get("read_only_requests", True))
+                    ):
+                        stream["refresh_sent"] = True
+                        await forward("stream_refresh", address=address,
+                                      no_data_seconds=round(age))
+                        await send_read_handshake("stream_refresh")
+                    try:
+                        await asyncio.wait_for(link_lost.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        pass
             else:
-                await forward("read_requests_disabled", address=address)
-            await asyncio.sleep(listen)
-            await client.stop_notify(notify_char)
+                await asyncio.sleep(listen)
+            if client.is_connected:
+                await client.stop_notify(notify_char)
     except BleakDeviceNotFoundError as exc:
         LOG.warning("Discovered BLE device disappeared before connection: %s", address)
         await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}", retry_on_next_scan=True)
@@ -369,11 +405,99 @@ async def poll_cycle(cfg: dict[str, Any], *, startup: bool) -> None:
             await probe(address, cfg, device)
 
 
+
+async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
+    """One long-running BLE session per configured BMS; independent reconnection.
+
+    Discovery is shared and serialized. Only missing/disconnected BMS are
+    scanned. There is at most one connection task per configured MAC address.
+    """
+    workers: dict[str, asyncio.Task[None]] = {}
+    started: dict[str, float] = {}
+    failures: dict[str, int] = {}
+    retry_at: dict[str, float] = {}
+    first_scan = True
+    next_scan = 0.0
+    await forward("persistent_manager_start", mode="one_session_per_BMS")
+    try:
+        while True:
+            cfg = options()
+            configured = addresses(str(cfg.get("bms_addresses", "")))
+            now = time.monotonic()
+
+            # Handle removals in add-on config and dead connections independently.
+            for mac, task in list(workers.items()):
+                if mac not in configured:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    del workers[mac]
+                    retry_at.pop(mac, None)
+                elif task.done():
+                    await asyncio.gather(task, return_exceptions=True)
+                    del workers[mac]
+                    lived = now - started.get(mac, now)
+                    failures[mac] = 0 if lived > 60 else min(5, failures.get(mac, 0) + 1)
+                    delay = min(120, max(10, 10 * (2 ** max(0, failures[mac] - 1))))
+                    retry_at[mac] = now + delay
+                    await forward("reconnect_scheduled", address=mac,
+                                  delay_seconds=delay, previous_session_seconds=round(lived))
+
+            missing = [mac for mac in configured if mac not in workers]
+            eligible = [mac for mac in missing if now >= retry_at.get(mac, 0.0)]
+            if now >= next_scan and (eligible or not configured):
+                found = await scan(cfg)
+                # Start healthy discovered batteries immediately, without waiting
+                # for extra scans aimed at a missing battery.
+                for mac in eligible:
+                    device = found.get(mac)
+                    if device is None:
+                        continue
+                    workers[mac] = asyncio.create_task(
+                        probe(mac, cfg, device, persistent=True),
+                        name="jk-bms:" + mac
+                    )
+                    started[mac] = time.monotonic()
+                    await asyncio.sleep(0.5)
+
+                still_missing = [mac for mac in eligible if mac not in workers]
+                if still_missing and first_scan:
+                    # The initial reboot can leave some batteries briefly silent.
+                    extra = await recover_missing_devices(cfg, found, startup=True)
+                    for mac in still_missing:
+                        device = extra.get(mac)
+                        if device is None:
+                            await forward("device_not_seen", address=mac,
+                                          message="Absent after startup recovery scans")
+                            continue
+                        workers[mac] = asyncio.create_task(
+                            probe(mac, cfg, device, persistent=True),
+                            name="jk-bms:" + mac
+                        )
+                        started[mac] = time.monotonic()
+                        await asyncio.sleep(0.5)
+                elif still_missing:
+                    for mac in still_missing:
+                        await forward("device_not_seen", address=mac,
+                                      message="Not advertising; retry next scan")
+
+                first_scan = False
+                next_scan = time.monotonic() + max(
+                    20, int(cfg.get("scan_interval_seconds", 45))
+                )
+            await asyncio.sleep(3)
+    finally:
+        for task in workers.values():
+            task.cancel()
+        if workers:
+            await asyncio.gather(*workers.values(), return_exceptions=True)
+        await forward("persistent_manager_stop")
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.6", note="JK02_read_only_with_BLE_recovery"
+        "bridge_start", version="0.1.8", note="JK02_read_only_independent_BLE_sessions"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -385,17 +509,22 @@ async def main() -> None:
         await maybe_reset_adapter_on_start(options())
     except Exception:
         LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
-    while True:
-        try:
-            cfg = options()
-            await poll_cycle(cfg, startup=startup)
-            startup = False
-            await asyncio.sleep(max(20, int(cfg.get("scan_interval_seconds", 45))))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            LOG.exception("Unexpected BLE bridge error; retrying")
-            await asyncio.sleep(20)
+    cfg = options()
+    if bool(cfg.get("persistent_connections", True)):
+        await persistent_sessions(cfg)
+    else:
+        await forward("legacy_probe_mode", mode="short_connections")
+        while True:
+            try:
+                cfg = options()
+                await poll_cycle(cfg, startup=startup)
+                startup = False
+                await asyncio.sleep(max(20, int(cfg.get("scan_interval_seconds", 45))))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOG.exception("Unexpected BLE bridge error; retrying")
+                await asyncio.sleep(20)
 
 
 if __name__ == "__main__":
