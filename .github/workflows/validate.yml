@@ -14,7 +14,7 @@ jobs:
         run: |
           python -m json.tool repository.json >/dev/null
           python -m json.tool smart-jkbms-bluetooth/flows.json >/dev/null
-          python -m py_compile smart-jkbms-bluetooth/ble/bridge.py smart-jkbms-bluetooth/ble/mqtt_ha.py smart-jkbms-bluetooth/merge_flows.py
+          python -m py_compile smart-jkbms-bluetooth/ble/bridge.py smart-jkbms-bluetooth/ble/mqtt_ha.py smart-jkbms-bluetooth/ble/installation_id.py smart-jkbms-bluetooth/merge_flows.py
       - name: Validate YAML files
         run: |
           pip install 'PyYAML==6.0.2' 'bleak==3.0.2' 'paho-mqtt==2.1.0'
@@ -39,3 +39,5 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_parameters.py' -v
       - name: Node-RED to MQTT publisher tests
         run: node tests/test_mqtt_flows.js
+      - name: Optional BIP flow validation
+        run: node tests/test_bip_flows.js
