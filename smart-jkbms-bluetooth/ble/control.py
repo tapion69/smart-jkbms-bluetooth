@@ -92,11 +92,11 @@ class ControlService:
         action = payload.get("action")
         if action not in {"refresh", "set_temperature_disabled", "write_parameter"}:
             return 400, {"error": "action_not_allowed"}
-        if action == "refresh" and not bool(cfg.get("read_only_requests",True)):
-            return 403, {"error":"read_only_requests_disabled"}
+        if action in ("write_parameter", "set_temperature_disabled"):
+            if (self.mqtt_sink is None or
+                    not self.mqtt_sink.permission.get(mac, False)):
+                return 403, {"error": "allow_parameter_changes_disabled_for_bms"}
         if action == "write_parameter":
-            if not bool(cfg.get("allow_temperature_control", False)):
-                return 403, {"error": "manual_control_disabled_in_addon_options"}
             if payload.get("confirmation") != CONFIRM:
                 return 403, {"error": "explicit_confirmation_required"}
             register=payload.get("register")
@@ -107,8 +107,6 @@ class ControlService:
             except (ValueError,OverflowError) as exc:
                 return 400, {"error": "invalid_parameter_value", "details": str(exc)}
         if action == "set_temperature_disabled":
-            if not bool(cfg.get("allow_temperature_control", False)):
-                return 403, {"error": "manual_control_disabled_in_addon_options"}
             if payload.get("confirmation") != CONFIRM:
                 return 403, {"error": "explicit_confirmation_required"}
             if type(payload.get("disable")) is not bool:
