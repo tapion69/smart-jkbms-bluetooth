@@ -128,6 +128,30 @@ class TemperatureControlTests(unittest.TestCase):
             svc.unregister(A)
         asyncio.run(run())
 
+    def test_read_only_refresh_option_blocks_dangerous_fallback(self):
+        async def run():
+            cfg={"bms_addresses":A,"allow_temperature_control":True,
+                 "read_only_requests":False}
+            svc=ControlService(lambda:cfg,addresses)
+            queue=svc.register(A)
+            status,body=await svc.dispatch({"address":A,"action":"refresh"})
+            self.assertEqual(status,403)
+            self.assertEqual(body["error"],"read_only_requests_disabled")
+            self.assertTrue(queue.empty())
+            cfg["read_only_requests"]=True
+            async def respond():
+                cmd=await asyncio.wait_for(queue.get(),1)
+                self.assertEqual(cmd.action,"refresh")
+                cmd.future.set_result({"requests_sent":["0x96"]})
+            worker=asyncio.create_task(respond())
+            status,body=await svc.dispatch({"address":A,"action":"refresh"})
+            await worker
+            self.assertEqual(status,202)
+            self.assertEqual(body["requests_sent"],["0x96"])
+            self.assertFalse(body["verified_by_bms"])
+            svc.unregister(A)
+        asyncio.run(run())
+
     def test_local_api_rejects_bad_token(self):
         async def run():
             svc=ControlService(lambda:{"bms_addresses":A},addresses)

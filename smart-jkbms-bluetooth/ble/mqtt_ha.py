@@ -139,6 +139,7 @@ ALWAYS_SENSOR_KEYS = {
  "balance_current_a","cycles","soh_pct","temp1_c","temp2_c","mos_temp_c",
 }
 ALWAYS_BINARY_KEYS = {"charging_mos","discharging_mos","alarm_active"}
+SETTINGS_RESPONSE_TIMEOUT = 8.0  # seconds, configurable only in unit tests
 
 
 
@@ -365,6 +366,9 @@ class HomeAssistantMQTT:
         self.last_telemetry_sequence:dict[str,int]={}
         self.permission:dict[str,bool]={mac:False for mac in addresses}
         self.command_pending:dict[str,float]={}
+        self.pending_parameter_writes:set[str]=set()
+        self.last_settings_frame:dict[str,float]={}
+        self.settings_frame_rejected:dict[str,int]={}
         self.loop:asyncio.AbstractEventLoop|None=None
         self.last_mqtt_error=0.0
         self.online_cache:dict[str,bool]={}
@@ -451,16 +455,16 @@ class HomeAssistantMQTT:
         p=BY_KEY.get(key)
         if p is None:return
         if not self.cfg.get("allow_temperature_control",False) or not self.permission.get(mac,False):
-            self.emit(mac,"command_status","Refus: activer Autoriser modification paramètres")
-            return
-        if mac not in self.settings or (time.monotonic()-self.last_confirmed.get(mac,0))>180:
-            self.emit(mac,"command_status","Refus: paramètres BMS non confirmés (trame 0x01 absente)")
+            self.emit(mac,"command_status","Refus : autoriser d'abord la modification des paramètres")
             return
         if self.last_data.get(mac,0)<=0 or time.monotonic()-self.last_data[mac]>70:
-            self.emit(mac,"command_status","Refus: aucune télémétrie BMS récente")
+            self.emit(mac,"command_status","Refus : pas de mesures BMS récentes")
             return
         if self.loop is None or self.control is None:
-            self.emit(mac,"command_status","Refus: liaison BLE non disponible")
+            self.emit(mac,"command_status","Refus : liaison BLE indisponible")
+            return
+        if mac in self.pending_parameter_writes:
+            self.emit(mac,"command_status","Commande déjà en cours pour ce BMS")
             return
         try:
             if p.kind=="switch":
@@ -468,25 +472,109 @@ class HomeAssistantMQTT:
                 value=payload==b"ON"
             else:
                 value=float(payload.decode("ascii"))
-            # Validate range and on-wire encoding BEFORE queuing commands.
-            build_write(p.reg,value)
+            build_write(p.reg,value)  # Strong, typed allowlist check, no writes yet
         except (ValueError,UnicodeDecodeError,OverflowError):
-            self.emit(mac,"command_status","Refus: valeur hors limites pour "+key)
+            self.emit(mac,"command_status","Refus : valeur invalide pour "+key)
             return
-        # Never make this write appear as an acknowledged setting.
-        from control import CONFIRM
-        action={"address":mac,"action":"write_parameter",
-                "register":p.reg,"value":value,"confirmation":CONFIRM}
-        async def dispatch():
-            status,result=await self.control.dispatch(action)
-            with self._lock:
-                self.emit(mac,"command_status",
-                    ("Commande "+key+" envoyée, attente lecture de retour"
-                     if status==202 else "Refus "+key+": "+str(result.get("error","erreur"))))
-        future=asyncio.run_coroutine_threadsafe(dispatch(),self.loop)
+        self.pending_parameter_writes.add(mac)
+
+        async def confirmed_readback_after(since:float, seconds:float)->bool:
+            deadline=time.monotonic()+seconds
+            while time.monotonic()<deadline:
+                with self._lock:
+                    if self.last_confirmed.get(mac,0)>since:
+                        return True
+                    if not self.permission.get(mac,False):
+                        return False
+                await asyncio.sleep(0.25)
+            return False
+
+        async def perform()->None:
+            from control import CONFIRM
+            try:
+                # Never write from cached/stale configuration. The BMS normally
+                # sends type-0x01 only after a request; trigger a fresh read if
+                # the last verified configuration is older than one minute.
+                with self._lock:
+                    age=time.monotonic()-self.last_confirmed.get(mac,0)
+                if age>60 or mac not in self.settings:
+                    with self._lock:
+                        self.emit(mac,"command_status",
+                                  "Lecture des paramètres BMS (0x96) avant modification…")
+                    since=time.monotonic()
+                    rejected_before=self.settings_frame_rejected.get(mac,0)
+                    status,result=await self.control.dispatch(
+                        {"address":mac,"action":"refresh"})
+                    if status!=202:
+                        with self._lock:
+                            self.emit(mac,"command_status",
+                                "Refus : lecture paramètres impossible ("+
+                                str(result.get("error","échec"))+")")
+                        return
+                    if not await confirmed_readback_after(since,SETTINGS_RESPONSE_TIMEOUT):
+                        with self._lock:
+                            rejected=self.settings_frame_rejected.get(mac,0)>rejected_before
+                            reason=("trame 0x01 reçue mais invalide" if rejected else
+                                    "aucune trame 0x01 reçue")
+                            self.emit(mac,"command_status",
+                                "Refus : "+reason+" après demande 0x96. Aucune écriture.")
+                        return
+                with self._lock:
+                    if (not self.permission.get(mac,False) or
+                        not self.cfg.get("allow_temperature_control",False) or
+                        time.monotonic()-self.last_data.get(mac,0)>70 or
+                        time.monotonic()-self.last_confirmed.get(mac,0)>60):
+                        self.emit(mac,"command_status",
+                                  "Refus : autorisation ou mesures BMS périmées")
+                        return
+                    expected_current=self.settings[mac].get(key)
+                    if expected_current is None:
+                        self.emit(mac,"command_status",
+                                  "Refus : paramètre "+key+" absent de la trame 0x01")
+                        return
+                since_write=time.monotonic()
+                status,result=await self.control.dispatch(
+                    {"address":mac,"action":"write_parameter",
+                     "register":p.reg,"value":value,"confirmation":CONFIRM})
+                if status!=202:
+                    with self._lock:
+                        self.emit(mac,"command_status",
+                            "Refus "+key+" : "+str(result.get("error","échec")))
+                    return
+                with self._lock:
+                    self.emit(mac,"command_status",
+                              "Commande "+key+" transmise ; vérification de l'état BMS…")
+                if await confirmed_readback_after(since_write,SETTINGS_RESPONSE_TIMEOUT):
+                    with self._lock:
+                        actual=self.settings.get(mac,{}).get(key)
+                        confirmed=(actual==value if p.kind=="switch" else
+                            type(actual) in (int,float) and
+                            abs(actual-value)<=max(1e-5,p.step/2))
+                        self.emit(mac,"command_status",
+                            ("Confirmé par le BMS : "+key+" = "+str(actual))
+                            if confirmed else
+                            ("Commande reçue mais état non modifié : "+key+
+                             " (BMS = "+str(actual)+")"))
+                else:
+                    with self._lock:
+                        self.emit(mac,"command_status",
+                            "Commande "+key+" envoyée, sans confirmation 0x01 : état incertain")
+            except Exception as exc:
+                LOG.warning("Parameter command processing failed for %s: %s",mac,exc)
+                with self._lock:
+                    self.emit(mac,"command_status",
+                              "Échec commande : communication BLE / relecture")
+            finally:
+                with self._lock:
+                    self.pending_parameter_writes.discard(mac)
+
+        future=asyncio.run_coroutine_threadsafe(perform(),self.loop)
         def done(f):
             try:f.result()
-            except Exception as exc:LOG.error("JK parameter command failed: %s",exc)
+            except Exception as exc:
+                LOG.error("Unexpected parameter task error: %s",exc)
+                with self._lock:
+                    self.pending_parameter_writes.discard(mac)
         future.add_done_callback(done)
 
     def _device(self,mac:str)->dict[str,Any]:
@@ -787,10 +875,16 @@ class HomeAssistantMQTT:
                     return True
                 if frame_type==1:
                     parsed=parse_settings(raw)
-                    if not parsed:return False
+                    if not parsed:
+                        self.settings_frame_rejected[mac]=self.settings_frame_rejected.get(mac,0)+1
+                        LOG.warning("JK settings CRC OK but unsupported/implausible layout for %s; "
+                                    "values not trusted, no writes enabled",mac)
+                        return False
                     self.settings[mac]=parsed
                     self.last_confirmed[mac]=time.monotonic()
-                    LOG.info("JK settings frame validated for %s (%d parameters)",mac,len(parsed))
+                    self.last_settings_frame[mac]=time.monotonic()
+                    self.settings_frame_rejected[mac]=0
+                    LOG.info("JK settings 0x01 confirmed for %s (%d parameters)",mac,len(parsed))
                 else:
                     self.info[mac]=parse_info(raw)
                 if mac in self.state:
@@ -801,6 +895,8 @@ class HomeAssistantMQTT:
             if kind=="lifecycle" and data.get("event") in ("disconnected","stream_stale"):
                 self.emit(mac,"availability","offline")
                 self.last_data.pop(mac,None)
+                self.last_confirmed.pop(mac,None)
+                self.settings.pop(mac,None)
                 self.last_telemetry_frame.pop(mac,None)
                 self.last_telemetry_sequence.pop(mac,None)
                 self.permission[mac]=False

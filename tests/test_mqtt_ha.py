@@ -419,6 +419,91 @@ class MQTTTests(unittest.TestCase):
             self.assertFalse(m.permission[A])
         asyncio.run(run())
 
+    def test_missing_settings_auto_read_then_verified_balance_off(self):
+        import mqtt_ha
+        async def run():
+            m,c=self.instance()
+            m.cfg["allow_temperature_control"]=True
+            m.loop=asyncio.get_running_loop()
+            m.ingest(sample_data(A))
+            m.permission[A]=True
+            sent=[]
+            def frame_with_balance(enabled):
+                b=bytearray.fromhex(settings_frame())
+                b[126]=int(enabled)
+                b[299]=sum(b[:299])&255
+                return {"address":A,"kind":"frame","frame_type":1,"raw_hex":b.hex()}
+            async def dispatch(request):
+                sent.append(request)
+                if request["action"]=="refresh":
+                    m.loop.call_later(.1,m.ingest,frame_with_balance(True))
+                    return 202,{"requests_sent":["0x96"]}
+                self.assertEqual(request["action"],"write_parameter")
+                self.assertEqual(request["register"],0x1F)
+                self.assertIs(request["value"],False)
+                m.loop.call_later(.1,m.ingest,frame_with_balance(False))
+                return 202,{"verified_by_bms":False}
+            m.control=SimpleNamespace(dispatch=dispatch)
+            with patch.object(mqtt_ha,"SETTINGS_RESPONSE_TIMEOUT",1):
+                m._parameter_command(A,"balancer_enabled",b"OFF")
+                await asyncio.sleep(.65)
+            self.assertEqual([x["action"] for x in sent],
+                             ["refresh","write_parameter"])
+            self.assertFalse(m.settings[A]["balancer_enabled"])
+            status=[message for topic,message,_,_ in c.published
+                    if topic==m.base(A)+"/command_status"]
+            self.assertTrue(any("Confirmé par le BMS" in x for x in status),status)
+            self.assertFalse(m.pending_parameter_writes)
+        asyncio.run(run())
+
+    def test_settings_missing_never_writes_and_explains_no_0x01(self):
+        import mqtt_ha
+        async def run():
+            m,c=self.instance()
+            m.cfg["allow_temperature_control"]=True
+            m.loop=asyncio.get_running_loop()
+            m.ingest(sample_data(A))
+            m.permission[A]=True
+            actions=[]
+            async def dispatch(request):
+                actions.append(request["action"])
+                return 202,{"requests_sent":["0x96"]}
+            m.control=SimpleNamespace(dispatch=dispatch)
+            with patch.object(mqtt_ha,"SETTINGS_RESPONSE_TIMEOUT",.4):
+                m._parameter_command(A,"balancer_enabled",b"OFF")
+                await asyncio.sleep(.7)
+            self.assertEqual(actions,["refresh"])
+            self.assertFalse(m.pending_parameter_writes)
+            status=[message for topic,message,_,_ in c.published
+                    if topic==m.base(A)+"/command_status"]
+            self.assertTrue(any("aucune trame 0x01" in x for x in status),status)
+            self.assertNotIn(A,m.settings)
+        asyncio.run(run())
+
+    def test_stale_settings_are_refreshed_and_permission_revocation_blocks_write(self):
+        import mqtt_ha
+        async def run():
+            m,c=self.instance()
+            m.cfg["allow_temperature_control"]=True
+            m.loop=asyncio.get_running_loop()
+            m.ingest(sample_data(A))
+            self.assertTrue(m.ingest({"kind":"frame","address":A,"frame_type":1,
+                                      "raw_hex":settings_frame()}))
+            m.last_confirmed[A]=time.monotonic()-400
+            m.permission[A]=True
+            actions=[]
+            async def dispatch(request):
+                actions.append(request["action"])
+                m.permission[A]=False
+                return 202,{"requests_sent":["0x96"]}
+            m.control=SimpleNamespace(dispatch=dispatch)
+            with patch.object(mqtt_ha,"SETTINGS_RESPONSE_TIMEOUT",.3):
+                m._parameter_command(A,"balancer_enabled",b"ON")
+                await asyncio.sleep(.5)
+            self.assertEqual(actions,["refresh"])
+            self.assertFalse(m.pending_parameter_writes)
+        asyncio.run(run())
+
     def test_v024_prune_duplicates_raw_masks_and_retained_entities(self):
         from mqtt_ha import RETIRED_SENSOR_KEYS, RETIRED_BINARY_KEYS
         from parameters import BY_KEY

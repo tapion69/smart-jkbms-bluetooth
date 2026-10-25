@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Version 0.2.5 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Version 0.2.6 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
 Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
@@ -93,3 +93,21 @@ These are deliberately presentation and data-reliability changes. No change is m
 **Protocol comparisons:** [syssi BLE JK02_32S frame offsets](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md), [BatMON JK BLE decoder](https://github.com/fl4p/batmon-ha/blob/master/bmslib/models/jikong.py). Verified against simulated 24S/32S type-0x02 packets with 300-byte checksum, MQTT data flow, discovery, and previous released forwarding functions.
 
 **After upgrading:** restart the add-on, allow the current MQTT discovery to refresh, and review both devices. No manual deletion of MQTT devices is necessary. The old entity labels may persist if Home Assistant was customized by the owner; the entity's display name can be reset in its settings.
+
+## v0.2.6 — Fix parameter switches reverting to their previous state
+
+A real Home Assistant failure was captured on 25 October 2026 while trying to switch **BMS balance** off: `Refus : paramètres BMS non confirmés (trame 0x01 absente)`. The BMS and 0x02 measurements stayed online, but changes were correctly rejected because the add-on had not received **current, checksum-validated settings**. Previously the BLE bridge sent 0x96 mostly at initial connection, yet the command gate considered settings stale after three minutes. This could prevent every parameter write for long-running sessions.
+
+**Fixed without bypassing the safety guard:**
+
+- Python BLE bridge now gently requests a **read-only 0x96 settings update every 120 seconds**, separately on each persistent BMS BLE session, with no reconnect and no change to the electrical frame decoder.
+- If a user adjusts a parameter while no fresh verified type-0x01 settings frame exists, the MQTT command handler **requests a fresh 0x96 reading automatically, then waits up to 8 seconds** for a 300-byte frame with a valid header, type, CRC and plausible JK02_32S settings values.
+- **A write is sent only after that confirmation**, provided that explicit Home Assistant `Autoriser modification paramètres` remains ON, the add-on write option remains enabled, the telemetry is fresh, the setting appears in a verified configuration frame, and the requested value is on the strict register allowlist.
+- An additional **readback after writing** determines whether the BMS actually applied the requested value. HA continues showing the verified BMS state: **no optimistic ON/OFF animation** or invented settings.
+- If the BMS still does not transmit an accepted 0x01 frame, **no command is sent**. A diagnostic entity displays a specific reason: no frame received, invalid/unsupported frame, read-only requests disabled, BLE unavailable or post-write readback absent. It never disables BMS protection or writes around the fault.
+- A per-BMS pending-command lock prevents repeated clicks from queuing multiple writes. The 15-second BLE write cooldown remains intact. Disconnection clears old settings confirmation.
+- Existing MQTT device IDs, user Node-RED flows, cell formatting, settings ranges and thermal safeguards remain unchanged.
+
+**To test:** Update to v0.2.6, ensure `read_only_requests: true` and `persistent_connections: true`, and restart. After the BMS is online, enable `allow_temperature_control: true` only if you intentionally want to modify BMS settings, then turn on the per-BMS HA switch `Autoriser modification paramètres`. When you manually change `BMS balance switch`, check the diagnostic entity `Dernière commande paramètres` for `Lecture des paramètres BMS (0x96)`, `Confirmé par le BMS` or a precise refusal. Do not repeatedly click or disable important BMS protections to make a test pass.
+
+**Still to verify on the actual hardware:** whether the target BMS returns a valid type-0x01 settings packet in response to 0x96 (protocol and firmware vary). A successful CI test only verifies the software safety logic and synthetic 0x01 responses.

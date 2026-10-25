@@ -92,6 +92,8 @@ class ControlService:
         action = payload.get("action")
         if action not in {"refresh", "set_temperature_disabled", "write_parameter"}:
             return 400, {"error": "action_not_allowed"}
+        if action == "refresh" and not bool(cfg.get("read_only_requests",True)):
+            return 403, {"error":"read_only_requests_disabled"}
         if action == "write_parameter":
             if not bool(cfg.get("allow_temperature_control", False)):
                 return 403, {"error": "manual_control_disabled_in_addon_options"}

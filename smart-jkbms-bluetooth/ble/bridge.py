@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.5.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.6.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -325,18 +325,21 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
 
             await client.start_notify(notify_char, on_notification)
 
-            async def send_read_handshake(reason: str) -> None:
+            async def send_read_handshake(
+                reason: str, commands: tuple[int, ...] = JK_READ_COMMANDS
+            ) -> list[str]:
                 # Per syssi/JK02: 0x97 requests device info, 0x96 settings;
                 # frame 0x02 is then sent automatically. Never alter BMS settings.
                 if not bool(cfg.get("read_only_requests", True)):
                     await forward("read_requests_disabled", address=address)
-                    return
+                    return []
                 if write_char is None:
                     await forward("read_unavailable", address=address,
                                   message="FFE1 write characteristic not found")
-                    return
+                    return []
                 response = "write-without-response" not in write_char.properties
-                for command in JK_READ_COMMANDS:
+                sent = []
+                for command in commands:
                     packet = build_read_command(command)
                     await client.write_gatt_char(write_char, packet, response=response)
                     await forward(
@@ -344,11 +347,17 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                         command=f"0x{command:02X}", handle=write_char.handle,
                         frame_hex=packet.hex(" ").upper(), reason=reason
                     )
+                    sent.append(f"0x{command:02X}")
                     await asyncio.sleep(0.6)
+                return sent
 
             await send_read_handshake("initial")
             if persistent:
                 control_queue = CONTROL.register(address)
+                # JK settings 0x01 is usually sent *only* on request. A single
+                # handshake at startup becomes stale within minutes; refresh
+                # the settings at a gentle, read-only interval per BMS.
+                last_settings_read=time.monotonic()
                 await forward("session_persistent", address=address)
                 try:
                     while client.is_connected and not link_lost.is_set():
@@ -356,8 +365,12 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                             command = control_queue.get_nowait()
                             try:
                                 if command.action == "refresh":
-                                    await send_read_handshake("manual_settings_refresh")
-                                    result = {"requests_sent": ["0x97", "0x96"]}
+                                    sent = await send_read_handshake(
+                                        "manual_settings_refresh", (0x96,))
+                                    last_settings_read=time.monotonic()
+                                    if not sent:
+                                        raise RuntimeError("JK settings request disabled/unavailable")
+                                    result = {"requests_sent": sent}
                                 elif command.action == "write_parameter":
                                     if write_char is None:
                                         raise RuntimeError("BLE write characteristic unavailable")
@@ -391,6 +404,17 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                             except Exception as exc:
                                 if not command.future.done():
                                     command.future.set_exception(exc)
+                        if (time.monotonic()-last_settings_read>=120 and
+                            bool(cfg.get("read_only_requests",True))):
+                            try:
+                                sent=await send_read_handshake(
+                                    "periodic_settings_refresh",(0x96,))
+                                if sent:
+                                    last_settings_read=time.monotonic()
+                            except Exception as exc:
+                                LOG.warning("Settings read 0x96 failed for %s: %s",
+                                            address,exc)
+                                last_settings_read=time.monotonic()
                         # AT/CRLF heartbeats alone are not proof of telemetry.
                         age = time.monotonic() - stream["last_data"]
                         if age > 90:
@@ -636,7 +660,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.2.5", note="JK02_verified_runtime_and_mqtt_upgrade"
+        "bridge_start", version="0.2.6", note="JK02_settings_refresh_and_verified_parameter_writes"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
