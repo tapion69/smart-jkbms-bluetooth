@@ -78,6 +78,22 @@ class MQTTTests(unittest.TestCase):
         m.connected=True
         return m,c
 
+    def test_three_or_more_configured_bms_keep_independent_mqtt_devices(self):
+        third = "C8:47:80:1A:30:03"
+        client = FakeClient()
+        manager = HomeAssistantMQTT({"mqtt_enabled": True}, [A, B, third], client=client)
+        manager.connected = True
+        for address in (A, B, third):
+            self.assertTrue(manager.ingest(sample_data(address)))
+            self.assertEqual(manager.discovered_cells[address], 16)
+        devices = {short_id(address) for address in (A, B, third)}
+        announcements = [json.loads(payload) for topic, payload, _, _ in client.published
+                         if topic.endswith("/config") and payload]
+        seen = {entity["device"]["identifiers"][0] for entity in announcements}
+        self.assertEqual(seen, devices)
+        self.assertEqual(manager._device(third)["name"], "JK-BMS 3")
+        self.assertEqual(len({a["unique_id"] for a in announcements}), len(announcements))
+
     def test_two_distinct_devices_and_temps_availability(self):
         m,c=self.instance()
         self.assertTrue(m.ingest(sample_data(A,True)))
