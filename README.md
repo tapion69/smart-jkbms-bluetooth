@@ -1,273 +1,79 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.2.3. Not yet a complete JK-BMS monitoring integration.**
+**Version 0.2.4 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
-Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
+Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
-## Included in v0.2.2 development milestone
+## Architecture (current)
 
-- Home Assistant add-on configuration, Dockerfile and startup script.
-- Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
-- BLE discovery on the host adapter, optionally including all nearby devices.
-- Read-only Bluetooth connection probes use BLEDevice objects retained from discovery; absent configured BMS addresses are skipped until the next scan.
-- Detect separate FFE1 write and notify handles; send only documented JK02 read requests `0x97` and `0x96` (optional), then stream raw BLE notifications to Node-RED.
-- Python-to-Node-RED local HTTP bridge protected by a random per-installation token.
-- Node-RED tabs: **Bluetooth | Diagnostics**, **JK-BMS | Trames**, and **JK-BMS | Mesures** (diagnostic-only JK02 parser).
-- Persistent Node-RED flows loaded from `/data/node-red/flows.json` (not `/addon/flows.json`); user modifications are retained on restart.
-- Home Assistant options translated into French and English.
+```text
+JK-BMS1, JK-BMS2
+   │ Bluetooth 0xFFE1
+   ▼
+Python BLE bridge (BlueZ/Bleak)
+   │ per-BMS BLE sessions, notifications and authenticated local HTTP
+   ▼
+Node-RED — internal transport and JK02 frame decoder (1895)
+   │ assemble 300-byte frames, verify checksum, validate measurements
+   ▼
+Python MQTT publisher (local-only HTTP 127.0.0.1:1896)
+   │ independent state, availability, HA discovery + approved commands
+   ▼
+Mosquitto → Home Assistant
+```
 
-**Not yet validated:** decoded cell measurements/SOC/temperature/current against a physical battery; MQTT Discovery and dashboards are not implemented. The only commands sent by this build are JK02 **read requests** `0x97` and `0x96`; no BMS configuration writes.
+**Node-RED is still part of the *data pipeline***. Do not stop the Node-RED process or delete its three remaining functional flow branches. **Node-RED is not the Home Assistant dashboard** and no standalone HTML page is needed: state, diagnostics, and configuration are managed directly through the discovered MQTT devices.
 
-## Installation
+### Minimal Node-RED flows
 
-1. In Home Assistant, open **Settings → Add-ons → Add-on Store → ⋮ → Repositories**.
-2. Add this URL: https://github.com/tapion69/smart-jkbms-bluetooth
-3. Install **Smart JK-BMS Bluetooth (Development)**.
-4. Node-RED credentials are not configured in the add-on options. Log in as **pi** using the same password as your Smart Voltronic installation.
-5. Start the add-on. Access Node-RED at **http://YOUR_HOME_ASSISTANT_IP:1895** from your LAN or trusted VPN.
-6. Open **Bluetooth | Diagnostics** and enable the right-side Debug panel. Look for **BLE raw and diagnostics**.
-7. If a BMS is discovered, place its Bluetooth MAC address in **bms_addresses** to test an actual connection, then restart the add-on. Multiple MAC addresses can be separated by commas.
+There are only three packaged files, with **no packaged Debug, Inject timer or obsolete HTML nodes**:
 
-If your BLE scanner returns no named JK-BMS devices, temporarily enable **scan_all_devices** to see other advertised peripherals and their RSSI.
+- `flows.json` — authenticated internal BLE HTTP events and CRC-checked 300-byte frame assembler;
+- `decoder_flows.json` — JK02_24S / JK02_32S electrical decoder and plausibility checks;
+- `mqtt_flows.json` — forward only verified frames/measurements to Python's MQTT publisher.
 
-BatMON or the official JK app may already be connected to a BMS. Disconnect their active BLE session before connection testing with this add-on. In particular, stop BatMON while testing the same BMS.
+`merge_flows.py` performs an idempotent update. It removes **unmodified vendor-owned legacy** debug/HTML/inject functions via `vendor_cleanup.json` and fixes their wires, but never deletes your own nodes or a renamed / modified old function. Existing custom Node-RED content is preserved, with a dated `/data/node-red/flows.json.*.bak` backup before changes. If you have manually connected a custom node to a retired vendor node, that dependency is preserved and logged.
+
+The old `/jk-bms/temperature` HTML interface is removed. Home Assistant MQTT **Configuration** already exposes the parameter controls and the per-BMS `Autoriser modification paramètres` switch.
 
 ## Configuration
 
-- **bluetooth_adapter**: auto, hci0, hci1, hci2, hci3. auto uses the BlueZ-selected adapter.
-- **scan_interval_seconds**: pause between full BLE scan/connection-probe cycles.
-- **scan_duration_seconds**: duration of discovery.
-- **scan_all_devices**: show all advertisements instead of only JK/BMS names.
-- **bms_addresses**: comma-separated BLE MAC addresses; blank means scanning only.
-- **connection_probe_seconds**: listen duration (seconds) in legacy short-session mode only.
-- **persistent_connections**: enabled by default in v0.1.8. Runs one independent long-lived BlueZ/Bleak connection per configured battery instead of repeatedly disconnecting after 15 seconds. Set false to restore the v0.1.7 short-session behavior.
-- **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
-- **adapter_reset_on_start**: optional global BlueZ adapter power cycle at add-on startup; OFF by default. Requires explicitly selecting the correct hci0-hci3 adapter instead of auto. Interrupts all Home Assistant BLE devices using that adapter. Disallowed in auto mode. The add-on continues to scan if the reset fails.
-- **Node-RED access**: account `pi`, bcrypt password hash set in `settings.js` (same hash as Smart Voltronic); no credential fields in the add-on configuration.
+Add repository `https://github.com/tapion69/smart-jkbms-bluetooth` in Home Assistant → Add-ons → Add-on Store → Repositories, then install the add-on and set:
 
-Known limitation: Some JK-BMS implementations only transmit telemetry after they receive protocol-specific read commands. In those cases a connection can succeed without any raw notifications. This is expected when read-only requests are disabled or the BMS does not use the supported JK02 protocol.
-
-## Security
-
-- The editor is reachable on port 1895 without TLS termination inside the add-on. Restrict usage to a trusted LAN or VPN, **do not port-forward it to the public internet**.
-- The Node-RED editor is protected with a fixed bcrypt password hash, copied from Smart Voltronic as requested. The plaintext password is not stored here. Sharing the same credentials across add-ons increases the impact of a leaked password.
-- The internal BLE events endpoint verifies a secret per-installation token.
-- User flows and secrets are stored under /data.
-- Bluetooth transport uses the Home Assistant host BlueZ through D-Bus, and does not take exclusive ownership of the adapter.
-
-## Troubleshooting
-
-- **Add-on will not start:** inspect the add-on logs and ensure the BLE / Node-RED dependencies started successfully.
-- **Node-RED does not open:** verify add-on is running and port 1895 is not already taken.
-- **scan_error mentioning BlueZ or D-Bus:** verify the Bluetooth adapter is detected by Home Assistant. Some hosts may require additional Supervisor/AppArmor configuration; check the error before changing privileges.
-- **device_not_seen:** a configured BMS was absent in the last scan, so connection is skipped until the next scan. Consider increasing scan duration and stopping other BLE applications.
-- **connection_error:** a BMS can disappear after discovery, or another app may be connected. Review BLE diagnostics.
-- **connected but no SOC/cell data:** expected: measurement decoding is provisional in v0.1.5. `41 54 0D 0A` is ASCII `AT` plus CR/LF, not a valid JK02 telemetry frame.
-
-## Project layout
-
-    smart-jkbms-bluetooth/
-      repository.json
-      README.md
-      smart-jkbms-bluetooth/
-        config.yaml
-        Dockerfile
-        run.sh
-        settings.js
-        flows.json
-        decoder_flows.json
-        merge_flows.py
-        ble/bridge.py
-        translations/en.yaml
-        translations/fr.yaml
-      .github/workflows/validate.yml
-
-## Development plan
-
-- 0.1.4: send JK02 0x97 and 0x96 read-only requests and report separate FFE1 characteristic properties, while retaining v0.1.3 scan improvements.
-- 0.1.5: provisional JK02_24S/JK02_32S telemetry decoder in Node-RED, profile plausibility checks, 5-second debug summaries, non-destructive flow migration.
-- Next: validate the telemetry against BatMON on actual batteries, confirm the exact JK02 profile, then implement MQTT Discovery and dashboards.
-
-**License:** copyright © 2026 tapion69. No redistribution or commercial-use license has been granted for this prototype. The licensing terms will be defined before a public release. We do not copy the source of BatMON, syssi, or the existing JK-BMS RS485 add-on.
-
-## Experimental JK02 decoder — v0.1.5
-
-The Node-RED **JK-BMS | Mesures** tab tries both JK02_24S and JK02_32S response layouts. It checks cell bitmask, individual cell voltage, pack voltage versus cell sum, SOC and temperature. Only a *single plausible* profile produces a diagnostic snapshot; ambiguous or invalid frames are shown in **Profil inconnu : raw_hex à envoyer** (no fabricated measurements).
-
-**Important:** 24S and 32S mean protocol layouts, not the battery's physical number of cells. Do not turn these provisional values into monitoring, automation, billing or charging-control sensors until the first raw frames are cross-checked against BatMON. No MQTT telemetry is published by this version. The summary Debug is rate-limited to one message per BMS every five seconds, but Node-RED retains all valid frames and the user can enable raw debugging when needed. The user flows remain untouched; on upgrades `merge_flows.py` adds vendor-only nodes and connections with a timestamped backup.
-
-Protocol reference: https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md
-
-## Bluetooth recovery (0.1.6)
-
-When a configured BMS is absent from the first BLE scan, the add-on first reads every BMS that **was detected** (so battery 2 is not delayed by recovery of battery 1), then runs up to **two additional scans of at least 15 seconds on startup**, and up to **one additional scan in later cycles**, without powering the adapter off. Diagnostic events `recovery_scan_start`, `recovery_scan_result` and `device_not_seen` remain visible in Node-RED. Normal BLE connections use a `BleakClient` context manager and are disconnected when the probe ends.
-
-### Optional one-time adapter power cycle
-
-To diagnose a stuck adapter, choose the correct `bluetooth_adapter` (for example `hci0`) and explicitly enable `adapter_reset_on_start`. Restart **this add-on once** to test it, then switch this option back off. The D-Bus reset briefly powers down the host adapter, disrupting every HA Bluetooth device sharing it. It requires host privileges that may not be available. The add-on never repeats a power-cycle during normal operation. If the JK-BMS is not advertising because BatMON or another app is connected, resetting the *PC adapter* cannot guarantee that the BMS will start advertising. This option does not provide Bluetooth pairing or encryption.
-
-## Quiet Node-RED diagnostics (v0.1.7)
-
-To avoid the Debug sidebar being overwhelmed by ~2 telemetry frames per second on each JK BMS, the following stock Debug nodes are **off by default** on new installations and are selectively switched off during an upgrade: `BLE raw and diagnostics`, `Trames JK02 valides (HEX)`, `Trames rejetées (CRC)`, `Mesures batterie (à confirmer)`, and `Profil inconnu : raw_hex à envoyer`. Their nodes and wires remain available and users can re-enable them whenever raw troubleshooting is needed. Renamed/customized nodes are left untouched.
-
-The only enabled Debug is **RÉSUMÉ JK-BMS (10 s) – SEUL DEBUG ACTIF** in the **JK-BMS | Mesures** tab. It shows one copy-friendly line per configured BMS every 10 seconds: voltage, current, power, SOC, cell count, cell delta, temperatures and inferred JK02 protocol. Values remain **provisional** pending comparison with known-good BatMON data. Migration appends only the vendor summary branch, writes a backup, and preserves all custom nodes; Bluetooth scanning and settings are unchanged.
-
-## Independent persistent Bluetooth sessions (v0.1.8)
-
-Each configured BMS is assigned **at most one** persistent BLE session, using its MAC address as the identity. On connection, the add-on subscribes to FFE1 notifications and sends read-only JK02 `0x97` (device info) and `0x96` (settings) requests. The BMS then streams type-0x02 telemetry spontaneously, as described by the syssi protocol documentation. No BMS parameter writes, switches, or MOS commands are sent. References: https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md and the user's existing JK-BMS RS485/Node-RED architecture (health monitoring, timeouts and alarms, used for design inspiration without copying RS485 framing into BLE).
-
-The manager **does not perform BLE discovery when all configured BMS are connected**. It scans again only for missing or disconnected BMS, with independent reconnect delays of 10 to 120 seconds on repeated early failures. A BMS that reports only the non-telemetry `AT\\r\\n` messages triggers a read-only handshake refresh after 45 seconds without any actual BLE data; if still silent at 90 seconds the manager reconnects that BMS only. All active session tasks are cancelled cleanly when the add-on stops. The optional host adapter reset remains **off by default** and is never performed as part of routine reconnection.
-
-Operational state is available as Node-RED events: `session_persistent`, `stream_refresh`, `stream_stale`, `reconnect_scheduled`, `connected`, `disconnected`, and `device_not_seen`. Debug traces remain opt-in; the single summary Debug reports measurements every 10 seconds per BMS. Values remain provisional until checked against physical BMS readings. If parallel connections do not work reliably on a particular HA Bluetooth adapter, switch **persistent_connections: false** and restart the add-on.
-
-## Per-BMS decoding diagnostics (v0.1.9)
-
-If the BLE logs show that a BMS is connected but **only another battery appears in the 10-second measurements**, this release differentiates four independent stages for each MAC address: Bluetooth connected, JK02 type-0x02 frame assembled with valid CRC, JK02_24S/JK02_32S layout plausibility check, and finally a decoded record. The **ÉTAT BMS 1 + BMS 2 (20 s)** Debug in **JK-BMS | Mesures** displays one text line per BMS every 20 seconds. It reports specific failures (cell bitmask, cell voltage, sum-of-cells versus pack voltage, invalid SOC, unexpected temperature), without flooding the Debug sidebar or exposing full HEX automatically.
-
-There is **no automatic relaxation** of validation for a failing BMS, no MQTT publication of rejected measurements, and **no change to Bluetooth or polling behavior** from 0.1.8. The three feed connections (Bluetooth lifecycle events, verified JK02 frames and successful decoder output) are appended non-destructively to existing user flows with a timestamped backup. Original Debug nodes remain off by default, but can be enabled manually. To diagnose a rejected battery, send the `ÉTAT BMS 1 + BMS 2 (20 s)` lines; if required, temporarily enable the full HEX Debug for one frame only.
-
-## BlueZ cached-connection recovery (v0.1.10)
-
-**Symptoms:** after restarting the add-on, zero configured JK-BMS advertisements are found although BlueZ sees other BLE devices. Linux BlueZ can retain a device as connected after a program closes or crashes, and a connected BMS may stop advertising. Bleak may then fail to rediscover it by scanning even while the existing BlueZ GATT object remains available. [Bleak Linux backend](https://bleak.readthedocs.io/en/latest/_modules/bleak/backends/bluezdbus/client.html) documents the already-connected workaround.
-
-**Behavior:** the persistent session manager now queries BlueZ `org.freedesktop.DBus.ObjectManager.GetManagedObjects` for **only the MAC addresses explicitly configured**. It accepts only `org.bluez.Device1` objects whose `Connected` flag is true, and only on the selected Bluetooth adapter (`hci0`, etc.). If a configured BMS is still connected in BlueZ, the bridge creates a native `BLEDevice` from that existing BlueZ object path, then opens a normal read-only Bleak session using the cached GATT connection **without requiring a fresh BLE advertisement**. Other devices are never touched. If the BMS is not connected according to BlueZ, the manager continues normal BLE discovery and the startup recovery scans. Errors reading BlueZ's object manager simply fall back to ordinary BLE scans.
-
-Events: `bluez_connected_recovered`, `bluez_connected_not_found`, or `bluez_cache_unavailable` explain which path was used. **No automatic controller power cycles, forced disconnections, unpairing, or host Bluetooth service restarts** are performed. The optional `adapter_reset_on_start` setting must remain **false** for normal use. These changes are specifically for the startup/restart edge case; they do not make a disconnected non-advertising BMS connectable, nor can they override an active smartphone/BatMON Bluetooth connection. BMS commands stay read-only and no unverified MQTT telemetry is published.
-
-## Compact per-BMS decoder rejection reasons (v0.1.11)
-
-The old verbose **ÉTAT BMS 1 + BMS 2 (20 s)** Debug output was truncated in the Node-RED sidebar, hiding *why* a valid JK02 frame was rejected. The new **BMS1 / BMS2 - diagnostic lisible 20s** Debug emits one short status per MAC plus at most two **separate short rejection lines** (24S and 32S) every 20 s. It reports the first failing validation, e.g. enabled cell count, implausible pack voltage, cell-sum mismatch, SOC > 100, current or temperature, with a count of remaining failures. Neither raw packets nor unverified readings are published to MQTT. The 0.1.8 BLE logic and existing telemetry decoder are unchanged.
-
-The old verbose Debug is automatically turned off on upgrade when its stock ID/name still match; customized or renamed user nodes are left alone. Existing custom flow nodes and wires remain in place, and `merge_flows.py` backs up the installed flow. A clean installation includes vendor links from BLE events, assembled valid frames and verified decoded measurements to the new compact function.
-
-To troubleshoot, send the **three short output lines** for `BMS 1A:EF` from this new Debug. The 24S and 32S rejection lines identify which data-field interpretation fails before changing any decoder checks.
-
-## JK02 temperature probe resilience (v0.1.12)
-
-Two independently connected BMSs both delivered checksum-valid 300-byte JK02 type-0x02 frames. BMS 2 decoded reliably with format JK02_32S, but BMS 1 was rejected **solely** because one reported temperature was outside the existing plausible -80°C..160°C range. The 24S interpretation has zero enabled cells and is not the correct protocol layout for BMS 1. This release keeps full validation of the battery pack voltage, current, SOC, enabled cells, sum of cell voltages, CRC, and supported JK02 format. It accepts an otherwise valid frame when **at most one of its three standard temperature channels** is implausible, marks that channel **null** (never zero or a fabricated reading), and attaches `temperature_quality=partial_unverified`, `invalid_temperature_channels`, and raw signed tenths of degrees for follow-up. A second invalid temperature still causes the frame to be rejected.
-
-The per-BMS Debug at ten seconds explicitly displays `TEMP T1/T2/MOS INVALIDE` near the SOC and `T1/T2/MOS N/D` for unavailable channels, rather than silently dropping other safe diagnostic measurements. The 20-second compact diagnostic also displays this warning. These readings are **experimental**: compare BMS 1 voltage, current, SOC, cells, and valid temperatures with BatMON, and investigate the suspect probe before considering alarms or Home Assistant publishing. No MQTT is added; **never** use a missing temperature for battery safety interlocks. `JK02_32S` refers to the wire format rather than the physically installed cell count. Offsets are cross-checked with syssi/esphome-jk-bms' BLE frame documentation and implementation; code remains original.
-
-**Upgrade safety**: The Node-RED merger patches only exactly fingerprint-matching, *unmodified* stock Function nodes from v0.1.11 (decoder, summary and short diagnostic). It makes a timestamped backup. If a user customized a Function, it remains untouched and the merge prints a warning instead of overwriting it. All custom nodes and wires are preserved.
-
-## Identify raw JK02 temperatures per BMS (v0.1.13)
-
-When one BMS receives valid BLE data and checksum-verified 300-byte frames, but fails `JK02_32S` temperature validation after v0.1.12, two causes remain: **at least two invalid temperatures**, which the v0.1.12 decoder intentionally rejects, or **the running Node-RED decoder still contains the older code** because a customized or renamed Function was preserved during migration.
-
-The new **TEMPÉRATURES BRUTES JK02 (20 s)** Debug node in **JK-BMS | Mesures** reads verified type-0x02 frame bytes directly (without modifying the decoder). Every 20 seconds per battery it emits just two short lines: T1/T2/MOS values at offsets 162/164/144, respectively, with `!` for invalid readings, then the invalid probe names/count, the raw probe-absence bitmask (byte 214), pack voltage, enabled cell count and SOC. These temperature bytes are presented solely as **diagnostics**: an out-of-range raw probe measurement is never treated as a valid or safe temperature. The function and Debug nodes are appended non-destructively; custom nodes and connections remain unchanged.
-
-The add-on startup log now reports `JK02 decoder active: current v0.1.12 temperature fallback` when the saved Node-RED Function contains the new decoder, or `legacy v0.1.11` / `customized/unrecognized Function` when the installed decoder is old. The exact add-on version alone cannot prove that the existing Node-RED Function was upgraded. Bluetooth, decoder validation, BMS commands, and MQTT behavior are unchanged. If all three temperature values are not plausible, inspect the actual JK-BMS temperature configuration and compare against BatMON before deciding how best to handle missing probes.
-
-Implementation note: in v0.1.13 the new Debug is connected only to **CRC-verified** frame stream output, not the original raw fragmented BLE notifications. Older Debug nodes remain available but disabled by default.
-
-## Explicit all-three −200 °C JK02 temperature marker (v0.1.14)
-
-Live observations for **BMS 1A:EF** show BLE connected, valid CRC and coherent JK02_32S pack voltage (~51.07 V), 16 enabled cells, but **every standard temperature field is exactly −200.0 °C (raw signed int16 = −2000)**. The other BMS 27:12 reports valid 16–19 °C sensors. This exact repeated value appears to be an unavailable-temperature marker; its precise firmware meaning is **not proven**. The reported `temperature_sensor_absent_mask` of 0x00 vs 0x3F in the other BMS is inconsistent with naïve interpretation, so the bridge preserves that byte for diagnostics but does not use it to infer which physical sensors exist.
-
-Previously v0.1.12 rejected a valid pack when more than one of T1/T2/MOS was invalid. Now the JK02_32S experimental decoder recognizes **only the exact raw triple (-2000,-2000,-2000)** as a special case: if and only if the 300-byte CRC, JK02 frame type, populated cell bitmask, safe plausible cell voltages, pack/sum consistency, pack current, and SOC all pass, it emits **diagnostic-only electrical telemetry**; all three temperatures are `null`, NEVER -200 °C or 0 °C. It marks `temperature_quality: "all_unavailable_raw_minus200"`, `electrical_data_only: true`, and `temperatures_usable_for_safety: false` for every experimental frame. The existing 10-second summary visibly says `TEMP T1,T2,MOS INVALIDE` and renders T1/T2/MOS as `N/D`. The 20-second health diagnostic indicates the unavailable channels. Arbitrary double/triple invalid temperatures (e.g. -201.0 °C or +3276.7 °C) remain rejected. All electrical validation remains strict.
-
-**Do not use these missing temperatures to control charging, cooling, safety interlocks, overheat/undercool alarms or battery protection.** The BMS's own onboard protections must remain independent. Before Home Assistant MQTT Discovery, compare the electrical measurements and the physical sensor status to BatMON/the JK app on BMS 1.
-
-The non-destructive startup migrator upgrades only an **exactly unchanged stock v0.1.11 or v0.1.12/v0.1.13 decoder**. Customized function code is never overwritten, with a startup warning instead. The code remains independent of the syssi implementation.
-
-## Temperature monitoring switch: read-only JK02_32S (v0.1.15)
-
-The `Disable Temp. Sensor` JK02_32S **configuration flag** is read from the checksum-verified **0x01 SETTINGS frame**, unsigned little-endian bitmask at bytes 282–283, bit 1 (`0x0002`). The blueprints in [syssi/esphome-jk-bms](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md) confirm that this is separate from the `0x02` STATUS frame's unrelated sensor absence mask at byte 214. **ON means temperature monitoring is disabled; OFF means enabled**. A BLE read-only request `0x96` already produces these settings frames, so v0.1.15 adds no request, no BMS setting write, and no MQTT publishing.
-
-In **JK-BMS | Mesures**, the new **SWITCH TEMPÉRATURES BMS1 / BMS2 (lecture seule)** Debug shows one line per configured BMS, rate-limited to once per minute unless the flag changes. It includes the address, current `Disable Temp. Sensor` flag, interpreted status, and raw bitmask `reg282`. The new Node-RED Function accepts only a correctly addressed, 300-byte, header- and checksum-verified settings frame (`type: 1`), not fragmented BLE events, and never exposes a clickable switch that would change the BMS.
-
-**Safety:** do not toggle this protection automatically. One temperature probe was physically cut on BMS 1; disabling the monitoring can remove temperature-related battery protections and does NOT guarantee that Modbus/RS485 responses will start working. RS485 `00 00` responses from the old add-on are not 300-byte telemetry frames. Check physical wiring and the RS485 protocol separately before enabling/disabling protection functions.
-
-## Manual, opt-in temperature monitoring control (v0.1.16)
-
-**Read before use.** The BLE JK02_32S switch `disable_temperature_sensors` writes register `0x28` with 4-byte value `1` (ON: **thermal monitoring DISABLED**) or `0` (OFF: thermal monitoring ENABLED). This can suppress safety functions on a lithium battery, particularly if a temperature probe has been physically cut. Only qualified users should test this on supervised, noncritical and noncharging battery equipment. The BMS's other protections and the circuit's independent thermal safeguards must remain operational. Never automate this setting; confirm the original setting and restore it after the test if safe to do so.
-
-The actual, **manual web switches** are at `http://<HOME_ASSISTANT_HOST>:1895/jk-bms/temperature` (e.g. on Tailscale). They are protected by HTTP Basic authentication using the **same `pi` credentials as the Node-RED editor**. This is a separate HTTP auth middleware; Node-RED adminAuth by itself does not secure custom HTTP endpoints. A same-origin JSON POST plus custom request header rejects browser cross-origin forms. The BLE control service binds **127.0.0.1:1896 only**, requires the private internal token, checks configured MAC addresses, validates one-time explicit confirmation in every write request, rate-limits writes, and executes them only on currently connected persistent sessions. No HTTP control port is exposed in add-on options or on the host.
-
-To enable a supervised one-time test, explicitly set `allow_temperature_control: true` in the add-on configuration and restart. It defaults to `false`. The page provides one toggle per configured BMS, plus a read-only **Relire les paramètres** button that sends the already-supported JK read requests `0x97/0x96`. **The toggle is not optimistic:** its position is confirmed only by a **CRC-valid type `0x01` settings frame** with bit `0x0002` at offset 282. Without a recent type-0x01 frame, the display shows `INCONNU` even after a command: "write sent" is NOT "setting accepted". We have not yet confirmed that both of the user's BMSs actually emit settings frames. Do not claim the test succeeded until the setting is independently verified in the JK app or from a fresh `0x01` frame. Use an external battery monitor during the test.
-
-Commands are **never triggered automatically** at startup or by dashboard refresh, and are **never published via MQTT**. No other battery registers are writable through this endpoint. Previous custom Node-RED flows are backed up and preserved.
-
-## Home Assistant MQTT Discovery — v0.2.0 (BLE JK02, 2 independent devices)
-
-This milestone publishes **two separate Home Assistant MQTT devices**, named `JK-BMS 1` and `JK-BMS 2`, from the configured BLE addresses. Unique IDs are derived from each **real MAC** and never change on restart; duplicate devices are not created when the number of the Bluetooth scanner's advertisement changes. MQTT runs inside the existing bridge, with a verified and token-protected `localhost:1896/mqtt` feed from Node-RED's native validated JK02 decoder; there is **no second exposed port**, no cloud dependency and no need for an additional Home Assistant MQTT bridge integration.
-
-In add-on options, set:
 ```yaml
 bms_addresses: "C8:47:80:1A:1A:EF,C8:47:80:1A:27:12"
 persistent_connections: true
+read_only_requests: true
 mqtt_enabled: true
 mqtt_host: core-mosquitto
 mqtt_port: 1883
-mqtt_username: YOUR_MOSQUITTO_USERNAME
-mqtt_password: YOUR_MOSQUITTO_PASSWORD
-mqtt_topic_prefix: smart_jkbms_ble
+mqtt_username: "<mosquitto-user>"
+mqtt_password: "<mosquitto-password>"
 mqtt_discovery_prefix: homeassistant
+mqtt_topic_prefix: smart_jkbms_ble
 allow_temperature_control: false
 ```
-Supply the credentials of your *existing* Mosquitto broker; do not publish them or commit them to GitHub. Discovery is retained in MQTT. All state values are published only after the source 300-byte JK02 frame passes CRC and the electrical decoder verifies 4–32 realistic cell voltages, a plausible pack voltage and cell-sum agreement, real signed current and valid SOC. The BMS1 *exact* triple -200 °C raw marker causes **temperature channels to be null/unavailable**, while the validated electrical values and 16 real cells are kept. No values are fabricated to fill unavailable fields.
 
-The devices have voltage/current/power/charge/discharge power, SOC and SOH (if present), per-cell voltage, min/max/average/delta, balance current/action, charge/discharge MOS states, remaining/nominal/cycled capacity, cycle count, total runtime, temperature sensors (T1/T2/MOS and additional channels if present), active alarm and bitmask, resistance/cable diagnostics, cell-wire warning mask and charge phase. Configuration thresholds come from a **CRC-valid type 0x01 settings frame**; firmware/hardware versions and UART/CAN protocol IDs come from a **CRC-valid type 0x03 info frame**. *Never* publish the device-info passcodes or user data. If these frames are missing, the settings and info entities show unknown rather than guessed values. All status attributes are independent for BMS1/BMS2.
+Replace MAC addresses and MQTT credentials with your own. Never publish private passwords. Open Home Assistant → Settings → Devices & services → MQTT → Devices to see your BMS. Node-RED developer editor (if needed) is on port 1895 and has its own authentication.
 
-The Home Assistant **Désactiver surveillance thermique** switch is created on each device (register 0x28), but manual writes are disabled by default. To perform an explicit supervised RS485 diagnostic test set `allow_temperature_control: true`, restart, press the adjacent **Armer commande thermique (30 s)** button and then operate the switch. Without this one-shot arm, a switch command is rejected and no BMS write occurs. **ON disables thermal protection**; OFF enables it. The switch is *never optimistic*: its ON/OFF state is published only after the BMS sends a CRC-valid type-0x01 settings frame. If no settings frame is received, it remains **unknown**. Sending a write does NOT prove the device accepted it. Do not disable protections on a loaded or charging pack, particularly with a physically cut temperature probe. Do not create HA automations for this unsafe control. The switch is registered as configuration and all MQTT commands are rate-limited by the existing BLE ControlService.
+## Home Assistant organization
 
-The switch **remains visible** but unavailable until `allow_temperature_control` is explicitly enabled. A per-BMS availability topic turns measurements unavailable if the bridge loses valid telemetry for 70 seconds. On reconnect the retained discovery and last validated state are republished. The MQTT broker must be reachable from the add-on and Home Assistant must already have the MQTT integration configured.
+**Measurements** — voltage, signed current, power, charging/discharging power, SOC, remaining capacity, balancing, cell 1–16 voltage, min/max/average and delta, and available temperature probes. Cell voltages and delta are shown with **3 decimals**, battery voltage with **1 decimal**, delta in **V**.
 
-Diagnostics remain accessible in Node-RED on port 1895. All user's customized Node-RED flows are preserved by `merge_flows.py` with backups and tested idempotent migrations. MQTT publishing is optional via `mqtt_enabled: false`.
+**Configuration** — one `number` or `switch` per allowlisted JK02 setting, **not** a second read-only sensor showing the same setting. `Autoriser modification paramètres` is OFF by default and resets to OFF on reconnect. The add-on-wide option `allow_temperature_control: true` must also be explicitly enabled before manual writes. A setting change is not reported as accepted until the BMS sends verified type-0x01 configuration readback; writes require fresh telemetry and config state.
 
-**Development limits**: status readings and JK02 frame interpretation remain experimental pending BatMON comparison. No measurements are to be trusted for overtemperature / short-circuit / charge safety interlocks. MQTT state availability is derived from valid decoded BLE telemetry, *not* just a connected BLE socket. Cell resistance and other supplementary frame offsets follow the documented JK02_32S layout and are not supported on arbitrary JK04 profiles. The BMS's physical protection settings must not be modified to make dashboard data look good.
+**Diagnostics** — useful values only: cell resistances, cell min/max index, cycle count/cycled capacity, SOH, remaining protection release timers, power-on count, supported firmware/hardware/identity fields, DRY1/DRY2 contacts, charging/heating state, readable alarms, emergency countdown and online status. No hex bitmask entities, raw numeric protocol/trigger IDs, redundant battery nominal capacity, redundant cell count, extra raw balancing/status codes or repeated runtime copies.
 
-## MQTT Discovery connection hotfix — v0.2.1
+Obsolete MQTT Discovery announcements are **actively deleted from the broker on reconnection** for each configured BMS; their stable device identity and surviving sensors are preserved. This updates the integration, not old manually created Lovelace YAML cards that explicitly reference removed entity IDs.
 
-**Fixed an issue that prevented any Home Assistant device registration.** Paho MQTT 2.x invokes `on_connect` with a `ReasonCode` object, and the previous implementation incorrectly called `int(reason_code)`. Since Paho 2.1.0 `ReasonCode` has no `__int__`, this raised a `TypeError` on every successful MQTT CONNACK, stopping discovery entirely. v0.2.1 uses the documented `reason_code == 0` comparison; the unit tests include an actual Paho 2.1.0 `ReasonCode(PacketTypes.CONNACK)` regression case.
+### Accuracy and protections
 
-On the next MQTT broker connection, logs now show:
-- `MQTT configuration: host=... port=... discovery=homeassistant enabled=True BMS=2 auth=configured (password hidden)`;
-- `MQTT broker connected. Publishing HA Discovery for 2 configured BMS: ...`;
-- `MQTT Discovery published for 2 BMS (homeassistant/#)`.
+The bridge only publishes validated electrical telemetry. A JK02 frame with exactly -200.0 °C in all three standard probes may still provide valid electrical data, but these missing temperatures remain unavailable in HA. Never use this experimental integration as a replacement for hardware battery or thermal protection.
 
-When the broker rejects credentials, the log reports `MQTT broker refused connection`. When TCP/DNS connection fails, the log reports `MQTT transport connection failed`. If the configured `bms_addresses` field is empty, the log explains that no devices can be registered. Passwords are never included.
+Current source references: [syssi JK-BMS BLE protocol documentation](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md) and [JK-BMS BLE decoder](https://github.com/syssi/esphome-jk-bms/blob/main/components/jk_bms_ble/jk_bms_ble.cpp).
 
-**Upgrade** the add-on, check Mosquitto username/password in its options, and restart. `mqtt_enabled` must be true, `mqtt_discovery_prefix` must match Home Assistant's configured MQTT discovery prefix, and `bms_addresses` must contain both MACs. Discovery is registered on broker connection even before measurements have been decoded; missing measurements remain unavailable. No change to Bluetooth session handling, temperature protections or existing custom Node-RED flows.
+## Updates and test policy
 
-## Version 0.2.2 – Décimales et paramètres MQTT
+Source and GitHub Actions cover JK02 framing, electrical validation, two-BMS MQTT discovery, parameter write safety, obsolete entity cleanup, and non-destructive Node-RED migration. Tests run without real batteries; verify newly supported measurements against the official JK application or BatMON before relying on them.
 
-Les deux appareils JK-BMS sont conservés avec leurs identifiants MAC. Home Assistant affiche les noms proches des captures : `Cell_1_volt` à `Cell_16_volt` (précision suggérée **3 décimales**), `Tension_Totale_volt` (**1 décimale**), `Cell_1_ohm`… `Cell_16_ohm` (**3 décimales**), `cell_voltage_delta` en **V avec 3 décimales** (exemple `0,005 V`, à la place de `5 mV`). Les numéros de cellules mini/maxi sont calculés d'après les valeurs réellement reçues. La préférence d'affichage est appliquée avec `suggested_display_precision` dans la découverte MQTT officielle et peut être personnalisée dans Home Assistant.
-
-Les entités sont classées comme dans les captures : mesures de fonctionnement, `Configuration` pour les paramètres, `Diagnostic` pour les résistances/alarmes/infos. Des entités `number` et `switch` sont découvertes pour **tous les paramètres JK02_32S dont les offsets de lecture et registres d'écriture ont pu être vérifiés** (tensions cellule, équilibrage, SOC 0/100, RCV/RFV, limites de courant, protections, délais, chauffage, nombre de cellules, capacité, MOS charge/décharge, sleep et autres commandes documentées). Des registres non documentés, le calibrage, les fonctions réservées et d'autres modèles JK02/JK04 **ne sont pas exposés en écriture**. Le code original se trouve dans `ble/parameters.py`; les correspondances ont été comparées à `syssi/esphome-jk-bms` et `docs/protocol-design-ble.md`.
-
-### Autorisation de modification
-
-La commande Home Assistant **`Autoriser modification paramètres`** apparaît dans chaque appareil JK-BMS. Ce **verrou logiciel local** n'est pas un réglage BMS. Par sécurité, il est **OFF après chaque démarrage, reconnexion MQTT ou perte de liaison BLE**; son état MQTT n'est pas conservé comme commande. Une fois activé, il reste ON jusqu'à ce que tu l'éteignes ou que l'une de ces conditions survienne, **sans temporisation de 30 secondes**. L'ancien bouton `Armer commande thermique (30 s)` est supprimé des découvertes retenues. En plus du verrou, l'option principale `allow_temperature_control: true` doit être explicitement activée dans la configuration de l'add-on pour autoriser toute écriture : ce nom est conservé pour compatibilité avec la version précédente. La désactivation de cette option bloque toutes les modifications.
-
-**Précautions** : l'écriture de réglages électriques ou thermiques peut faire interrompre la charge, désactiver une protection ou endommager une batterie. Évite les automatisations sur ces commandes. Le bridge exige une télémétrie fraîche et **une trame de paramètres 0x01 vérifiée il y a moins de 180 secondes** avant toute écriture; si tes BMS n'envoient pas cette trame, les réglages restent inconnus et les commandes sont refusées. Les valeurs sont validées par liste blanche, type, limites et échelle; une commande envoyée n'est jamais affichée comme confirmée. Le BMS doit renvoyer une nouvelle trame 0x01 pour confirmer la valeur. Les paramètres inutilisables ou hors plage restent inconnus. Les données ne doivent pas servir de remplacement aux protections matérielles.
-
-La mise à jour supprime automatiquement les anciennes annonces MQTT retenues du bouton 30 s et des entités capteur remplacées par des entités Number; aucun nouvel appareil dupliqué. Le flow Node-RED personnalisé est préservé, avec la sauvegarde de migration existante.
-
-## Version 0.2.3 — Advanced JK02_32S readings (no additional writes)
-
-**Two independent MQTT devices remain unchanged**, as do their stable MAC-derived unique IDs and the existing 3-decimal cell voltages, 1-decimal pack voltage, 3-decimal cell voltage delta in V, and validated battery telemetry. The existing **Configuration** parameters and **Autoriser modification paramètres** switch are unchanged. This release adds *read-only* information only. It does not introduce any new CAN/UART register writes or changes to battery protections.
-
-**Type 0x02 measurements**, parsed from the same 300-byte CRC-checked JK02_32S frame already associated by sequence with each validated decoded record:
-
-| New Home Assistant entity | Frame bytes | Meaning |
-| --- | --- | --- |
-| `DRY1 contact`, `DRY2 contact`, `Contacts secs (masque)` | 281 (bits 1,2) | Physical dry-contact states |
-| `Heating_Current` | 236–237 | Heater current, A (signed /1000) |
-| `Emergency_countdown`, `Emergency` | 218–219 | Emergency seconds and derived active flag |
-| `Smart_sleep_countdown` | 270–273 | Smart-sleep time remaining in seconds |
-| `charge_status_time`, `charge_status` | 278–280 | Seconds in charge phase and raw phase ID |
-| `Detail_log_count` | 266–269 | Logged diagnostic events |
-| `Type batterie`, `Type batterie (ID)` | 275 | LiFePO4/Li-ion/LTO identification |
-| `Total_runtime_formatted` | 194–197 | Derived uptime text (days/hours/minutes) |
-| `Switch_Balance (état réel)` | 201 | Actual balancing indicator |
-| `Chargeur branché`, `Module PCL actif` | 245, 274 | JK02 status flags when values are explicitly 0/1 |
-| Six overcurrent / short-circuit / under- and overvoltage recovery timers | 202–213 | Remaining release timers in seconds |
-
-**Type 0x03 device information**, only when a valid settings/info frame is received: device model and name, hardware/software versions, manufacturing date (validated YYMMDD), read-only serial number, power-on count, device runtime, CAN and UART1/UART2 protocol identifiers, UART2 enabled flag, UART3 protocol ID, DRY1/DRY2 and LCD buzzer trigger IDs, protocol library IDs, recorded-data period, RCV/RFV times. **The bridge never publishes the JK device passcode, setup passcode or arbitrary user data** from this information frame.
-
-**Online** is a separate MQTT connectivity binary sensor driven by per-BMS telemetry availability, so it can display online/offline rather than disappearing as unavailable when the BMS disconnects. Remaining optional fields use normal Home Assistant unknown/unavailable behavior when a firmware does not supply them. When BMS1 reports -200 °C for its absent probes, these temperature entities remain unavailable; the electrical decoder is unchanged. Do not use these experimental fields to replace BMS temperature/electrical protection logic.
-
-Advanced UART1/UART2/UART3/CAN and DRY contact **selectors are intentionally read-only as raw IDs for now**. This avoids guessing the meaning of vendor-specific options and writing potentially hazardous configuration. Add editable select entities only after verifying register command semantics and readback on the actual firmware. Source reference: syssi/esphome-jk-bms `docs/protocol-design-ble.md` and `components/jk_bms_ble/jk_bms_ble.cpp`.
-
-**Validation**: simulated 300-byte JK02 packets test offset decoding, type-0x02 and type-0x03 separation, alarms/contacts, credentials never published, individual MAC identity, discovery entity types, and output validity. Real BMS firmware comparison remains necessary. No changes were made to user-customized Node-RED functions, Bluetooth session handling, or MQTT credentials.
+For problems, check the add-on log for `MQTT broker connected`, `MQTT Discovery published`, and `Node-RED cleanup` messages before enabling any debugging.

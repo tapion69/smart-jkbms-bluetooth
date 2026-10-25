@@ -71,130 +71,151 @@ def update_stock_functions(
 
 
 
+def _legacy_default(node: dict, manifest: dict) -> bool:
+    """Remove only the exact published vendor node (never a user-edited one)."""
+    if (node.get("id") != manifest["id"] or
+        node.get("type") != manifest["type"] or
+        node.get("name") != manifest.get("name")):
+        return False
+    if node.get("type") == "function":
+        code = node.get("func")
+        return isinstance(code, str) and (
+            len(code) == manifest["func_length"] and
+            legacy_fingerprint(code) == manifest["func_hash"]
+        )
+    return True
+
+
 def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
-    base = []
+    base: list[dict] = []
     for source in (packaged, *extra_packages):
-        nodes = json.loads(source.read_text(encoding="utf-8"))
-        if not isinstance(nodes, list):
+        chunk = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(chunk, list):
             raise ValueError(f"Vendor flow package {source} must be a JSON array")
-        base.extend(nodes)
-    if not isinstance(base, list):
-        raise ValueError("Vendor flows must be a JSON array")
+        base.extend(chunk)
+    packaged_by_id = {n["id"]: n for n in base}
+    if len(packaged_by_id) != len(base):
+        raise ValueError("Duplicated vendor Node-RED IDs")
     if not installed.exists():
         installed.parent.mkdir(parents=True, exist_ok=True)
-        # A fresh installation must include ALL packaged flow files,
-        # not only the original base flows.json.
-        installed.write_text(
-            json.dumps(base, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        print(f"[INFO] Initial Node-RED flows installed: {len(base)} nodes")
+        installed.write_text(json.dumps(base, ensure_ascii=False, indent=2)+"\n",
+                             encoding="utf-8")
+        print(f"[INFO] Minimal Node-RED pipeline initialized: {len(base)} nodes")
         return len(base)
 
     current = json.loads(installed.read_text(encoding="utf-8"))
     if not isinstance(current, list):
         raise ValueError("User flows must be a JSON array")
+    before_count=len(current)
     by_id = {n.get("id"): n for n in current if isinstance(n, dict)}
-    packaged_by_id = {n.get("id"): n for n in base if isinstance(n, dict)}
-    additions = [n for n in base if n["id"] not in by_id]
     updated_functions = update_stock_functions(by_id, packaged_by_id)
-    # Make the effective running decoder version visible in the add-on startup
-    # log, rather than relying on the add-on version number or old flow comments.
-    decoder = by_id.get("b150100000000004", {})
-    packaged_decoder = packaged_by_id.get("b150100000000004", {})
-    installed_code = decoder.get("func") if isinstance(decoder, dict) else None
-    packaged_code = packaged_decoder.get("func") if isinstance(packaged_decoder, dict) else None
-    if isinstance(installed_code, str) and installed_code == packaged_code:
-        print("[INFO] JK02 decoder active: current v0.1.14 exact -200C raw sentinel fallback")
-    elif isinstance(installed_code, str):
-        old_size, old_fingerprint = STOCK_FUNCTIONS_0111["b150100000000004"]
-        old_fp = legacy_fingerprint(installed_code)
-        if (len(installed_code), old_fp) == STOCK_DECODER_0112:
-            print("[WARN] JK02 decoder active: legacy v0.1.12; raw -200C fallback not installed")
-        elif len(installed_code) == old_size and old_fp == old_fingerprint:
-            print("[WARN] JK02 decoder active: legacy v0.1.11; raw -200C fallback not installed")
-        else:
-            print("[WARN] JK02 decoder active: customized/unrecognized Function; upgrade preserved it")
-    else:
-        print("[WARN] JK02 decoder not installed yet")
-    changed = bool(additions or updated_functions)
 
-    # Append vendor links only; never replace custom source nodes or wires.
-    links = (
-        ("136f1472850339d1", "77930ff9204bec01"),
-        ("65ad8ac512b5e001", "b150100000000002"),
-        ("b150100000000004", "f5500ba6100a0001"),
-        ("136f1472850339d1", "b190021900000001"),
-        ("65ad8ac512b5e001", "b190021900000001"),
-        ("b150100000000004", "b190021900000001"),
-        ("136f1472850339d1", "b111a90000000002"),
-        ("65ad8ac512b5e001", "b111a90000000002"),
-        ("b150100000000004", "b111a90000000002"),
-        ("65ad8ac512b5e001", "b120001300000001"),
-        ("65ad8ac512b5e001", "b121500000000001"),
-        ("65ad8ac512b5e001", "b161600000000010"),
-        ("136f1472850339d1", "b200000000000002"),
-        ("65ad8ac512b5e001", "b200000000000002"),
-        ("b150100000000004", "b200000000000002"),
+    # A retired vendor file must not be reimported indefinitely: migrate away
+    # its stock nodes, including its Debug, Inject and HTML page. A renamed
+    # node or a modified Function is considered user-owned and is preserved.
+    manifest_file = Path(__file__).with_name("vendor_cleanup.json")
+    cleanup = json.loads(manifest_file.read_text(encoding="utf-8"))
+    matching = {n["id"] for n in cleanup if isinstance(by_id.get(n["id"]),dict)
+                and _legacy_default(by_id[n["id"]],n)}
+    # If a user's custom node links to a retired vendor node, preserve it
+    # rather than silently destroying that custom integration.
+    user_nodes = [n for n in current if isinstance(n,dict)
+                  and n.get("id") not in matching
+                  and n.get("id") not in packaged_by_id]
+    protected = set()
+    for node in user_nodes:
+        for targets in node.get("wires",[]):
+            if isinstance(targets,list):
+                protected.update(k for k in targets if k in matching)
+        for target in node.get("links",[]):
+            if target in matching:
+                protected.add(target)
+    matching.difference_update(protected)
+    for node_id in sorted(protected):
+        print(f"[WARN] Preserving retired vendor node {node_id}: custom/user wiring depends on it")
+
+    new_current = [n for n in current if not isinstance(n,dict)
+                   or n.get("id") not in matching]
+    changed = bool(updated_functions or matching)
+
+    if matching:
+        for node in new_current:
+            if not isinstance(node,dict):
+                continue
+            if isinstance(node.get("wires"),list):
+                for output in node["wires"]:
+                    if isinstance(output,list):
+                        size=len(output)
+                        output[:] = [target for target in output if target not in matching]
+                        if size!=len(output):
+                            changed=True
+            if isinstance(node.get("links"),list):
+                previous=len(node["links"])
+                node["links"][:]=[target for target in node["links"] if target not in matching]
+                if previous!=len(node["links"]):
+                    changed=True
+
+    by_id={n.get("id"):n for n in new_current if isinstance(n,dict)}
+    additions=[n for n in base if n["id"] not in by_id]
+    if additions:
+        new_current.extend(additions)
+        changed=True
+    by_id.update({n["id"]: n for n in additions})
+    # Only three functional branches remain: BLE events, CRC-validated
+    # JK02 0x02 decoder and authenticated internal MQTT publisher.
+    edges=(
+        ("136f1472850339d1","77930ff9204bec01"),
+        ("65ad8ac512b5e001","b150100000000002"),
+        ("136f1472850339d1","b200000000000002"),
+        ("65ad8ac512b5e001","b200000000000002"),
+        ("b150100000000004","b200000000000002"),
     )
-    packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
-    for source_id, target_id in links:
-        source = by_id.get(source_id)
-        if source is None and source_id in packaged_ids:
-            # First migration from a very old install: the source node will be
-            # supplied by the packaged flow and should already have its wiring.
+    for source,target in edges:
+        node=by_id.get(source)
+        if not isinstance(node,dict) or target not in packaged_by_id:
+            print(f"[WARN] Pipeline source/target missing: {source} -> {target}")
             continue
-        if not isinstance(source, dict) or target_id not in packaged_ids:
-            print(f"[WARN] Cannot automatically link {source_id} to {target_id}")
+        wires=node.get("wires")
+        if not isinstance(wires,list) or not wires or not isinstance(wires[0],list):
+            print(f"[WARN] Modified source wiring {source}, could not link {target}")
             continue
-        wires = source.get("wires")
-        if isinstance(wires, list) and wires and isinstance(wires[0], list):
-            if target_id not in wires[0]:
-                wires[0].append(target_id)
-                changed = True
-        else:
-            print(f"[WARN] User wiring was customized for {source_id}; link manually")
+        if target not in wires[0]:
+            wires[0].append(target)
+            changed=True
 
-    # Disable noisy *stock* Debug nodes only; preserve renamed/custom nodes.
-    # This intentional v0.1.7 migration simplifies the Debug sidebar for users.
-    noisy_defaults = {
-        "d4cb3acdbe43f291": "BLE raw and diagnostics",
-        "5524471869b2e0af": "Trames JK02 valides (HEX)",
-        "8d30a20107f452b3": "Trames rejetées (CRC)",
-        "b150100000000006": "Mesures batterie (à confirmer)",
-        "b150100000000007": "Profil inconnu : raw_hex à envoyer",
-        "b190021900000003": "ÉTAT BMS 1 + BMS 2 (20 s)",
-    }
-    disabled = 0
-    for node_id, expected_name in noisy_defaults.items():
-        item = by_id.get(node_id)
-        if (
-            isinstance(item, dict)
-            and item.get("type") == "debug"
-            and item.get("name") == expected_name
-            and item.get("active") is True
-        ):
-            item["active"] = False
-            disabled += 1
-            changed = True
+    decoder=by_id.get("b150100000000004")
+    packaged_decoder=packaged_by_id.get("b150100000000004")
+    if isinstance(decoder,dict) and decoder.get("func")==packaged_decoder.get("func"):
+        print("[INFO] JK02 decoder intact (CRC, 24S/32S, -200C sentinel checks)")
+    else:
+        print("[WARN] Custom/legacy JK02 decoder retained. Validate the decoding.")
 
     if not changed:
         return 0
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup = installed.with_name(installed.name + "." + timestamp + ".bak")
-    shutil.copy2(installed, backup)
-    current.extend(additions)
-    tmp = installed.with_name(installed.name + ".new")
+    timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup=installed.with_name(installed.name+"."+timestamp+".bak")
+    # Preserve distinct backups even when two migrations run in one second.
+    suffix=1
+    while backup.exists():
+        backup=installed.with_name(installed.name+"."+timestamp+f".{suffix}.bak")
+        suffix+=1
+    shutil.copy2(installed,backup)
+    tmp=installed.with_name(installed.name+".new")
     try:
-        tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, installed)
+        tmp.write_text(json.dumps(new_current,ensure_ascii=False,indent=2)+"\n",
+                       encoding="utf-8")
+        os.replace(tmp,installed)
     finally:
         tmp.unlink(missing_ok=True)
-    print(f"[INFO] Node-RED vendor flows merged: {len(additions)} nodes, {disabled} noisy Debug nodes disabled, {updated_functions} stock functions upgraded, backup {backup.name}")
+    print(f"[INFO] Node-RED cleanup: removed {len(matching)} legacy nodes, "
+          f"added {len(additions)}, migrated {updated_functions} stock functions; "
+          f"{before_count} -> {len(new_current)} nodes; backup {backup.name}")
     return len(additions)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: merge_flows.py INSTALLED_JSON PACKAGED_JSON [MORE_PACKAGES...]", file=sys.stderr)
+if __name__=="__main__":
+    if len(sys.argv)<3:
+        print("Usage: merge_flows.py INSTALLED_JSON PACKAGED_JSON [MORE_PACKAGES...]",
+              file=sys.stderr)
         sys.exit(2)
-    merge(Path(sys.argv[1]), Path(sys.argv[2]), *(Path(p) for p in sys.argv[3:]))
+    merge(Path(sys.argv[1]), Path(sys.argv[2]),*(Path(p) for p in sys.argv[3:]))

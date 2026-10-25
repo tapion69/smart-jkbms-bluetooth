@@ -21,7 +21,7 @@ export BLE_BRIDGE_TOKEN="$(cat /data/.ble_bridge_token)"
 
 # Merge new vendor nodes without overwriting existing user flows.
 # A backup is made whenever an update adds nodes or a link.
- /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/summary_flows.json /addon/health_flows.json /addon/short_diagnostics_flows.json /addon/raw_temperature_flows.json /addon/temperature_switch_flows.json /addon/temperature_control_flows.json /addon/mqtt_flows.json
+ /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/mqtt_flows.json
 
 # User flows are never overwritten on startup or update.
 export NODE_PATH="$(npm root -g)"
@@ -43,9 +43,9 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.2.3"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.2.4"
 echo "[INFO] Node-RED port: 1895"
-echo "[INFO] Starting Node-RED and BLE diagnostics bridge"
+echo "[INFO] Starting lightweight JK02 decoder and BLE-to-MQTT bridge"
 
 node-red --userDir "$WORKDIR" --settings /addon/settings.js "$WORKDIR/flows.json" &
 NR_PID=$!

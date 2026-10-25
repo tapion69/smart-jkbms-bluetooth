@@ -7,16 +7,6 @@
     "info": "0.1.5: experimental JK02_24S/32S decoder, diagnostic only; compare with BatMON before MQTT."
   },
   {
-    "id": "b150100000000008",
-    "type": "comment",
-    "z": "b150100000000001",
-    "name": "0.1.5 – Mesures expérimentales, aucun MQTT",
-    "info": "Format vérifié via masque, tension totale, somme des cellules, SOC et températures. Ne publier qu'après comparaison réelle avec BatMON.",
-    "x": 410,
-    "y": 50,
-    "wires": []
-  },
-  {
     "id": "b150100000000002",
     "type": "link out",
     "z": "8b55b11b32e064ac",
@@ -60,67 +50,9 @@
     "y": 155,
     "wires": [
       [
-        "b150100000000005",
-        "f5500ba6100a0001",
-        "b111a90000000002",
         "b200000000000002"
       ],
-      [
-        "b150100000000007"
-      ]
+      []
     ]
-  },
-  {
-    "id": "b150100000000005",
-    "type": "function",
-    "z": "b150100000000001",
-    "name": "Résumé 5s / batterie",
-    "func": "const a=msg.payload && msg.payload.address;\nif(!a) return null;\nconst now=Date.now(),key=\"last:\"+a;\nif(now-(context.get(key)||0)<5000) return null;\ncontext.set(key,now);\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 680,
-    "y": 125,
-    "wires": [
-      [
-        "b150100000000006"
-      ]
-    ]
-  },
-  {
-    "id": "b150100000000006",
-    "type": "debug",
-    "z": "b150100000000001",
-    "name": "Mesures batterie (à confirmer)",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 920,
-    "y": 125,
-    "wires": []
-  },
-  {
-    "id": "b150100000000007",
-    "type": "debug",
-    "z": "b150100000000001",
-    "name": "Profil inconnu : raw_hex à envoyer",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 735,
-    "y": 225,
-    "wires": []
   }
 ]

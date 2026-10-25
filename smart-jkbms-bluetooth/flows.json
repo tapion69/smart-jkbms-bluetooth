@@ -7,16 +7,6 @@
     "info": "Smart JK-BMS Bluetooth 0.1.0. BLE scan and connection probe only. No BMS measurements are decoded in this milestone."
   },
   {
-    "id": "e9d101defafdb611",
-    "type": "comment",
-    "z": "f03b52e846d017a1",
-    "name": "0.1.0 – BLE scan + raw diagnostics. No BMS write commands.",
-    "info": "Python Bleak sends JSON events to a localhost HTTP endpoint authenticated by a per-installation token.",
-    "x": 400,
-    "y": 60,
-    "wires": []
-  },
-  {
     "id": "9f55b622d2a19435",
     "type": "http in",
     "z": "f03b52e846d017a1",
@@ -81,39 +71,10 @@
     "y": 160,
     "wires": [
       [
-        "d4cb3acdbe43f291",
         "77930ff9204bec01",
-        "b111a90000000002",
         "b200000000000002"
       ]
     ]
-  },
-  {
-    "id": "d4cb3acdbe43f291",
-    "type": "debug",
-    "z": "f03b52e846d017a1",
-    "name": "BLE raw and diagnostics",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "true",
-    "targetType": "full",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 930,
-    "y": 160,
-    "wires": []
-  },
-  {
-    "id": "7474b3a8e3186203",
-    "type": "comment",
-    "z": "f03b52e846d017a1",
-    "name": "Next: JK02 commands → frame reconstruction → decoding → MQTT",
-    "info": "This prototype does not publish JK-BMS measurements, HA MQTT entities or write BMS settings.",
-    "x": 380,
-    "y": 300,
-    "wires": []
   },
   {
     "id": "8b55b11b32e064ac",
@@ -121,16 +82,6 @@
     "label": "JK-BMS | Trames",
     "disabled": false,
     "info": "0.1.4: reconstitute and CRC-validate 300-byte JK02 frames; data decoding and MQTT not yet implemented."
-  },
-  {
-    "id": "b1e8a31ca20a9361",
-    "type": "comment",
-    "z": "8b55b11b32e064ac",
-    "name": "0.1.4 – Lecture JK02 0x97 / 0x96, trames 300 octets, CRC",
-    "info": "Commandes envoyées par Python. Réassemblage et vérification du checksum dans Node-RED. Aucun réglage batterie modifié.",
-    "x": 370,
-    "y": 60,
-    "wires": []
   },
   {
     "id": "77930ff9204bec01",
@@ -176,50 +127,10 @@
     "y": 160,
     "wires": [
       [
-        "5524471869b2e0af",
-        "b111a90000000002",
-        "b120001300000001",
-        "b121500000000001",
-        "b161600000000010",
-        "b200000000000002"
+        "b200000000000002",
+        "b150100000000002"
       ],
-      [
-        "8d30a20107f452b3"
-      ]
+      []
     ]
-  },
-  {
-    "id": "5524471869b2e0af",
-    "type": "debug",
-    "z": "8b55b11b32e064ac",
-    "name": "Trames JK02 valides (HEX)",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 680,
-    "y": 140,
-    "wires": []
-  },
-  {
-    "id": "8d30a20107f452b3",
-    "type": "debug",
-    "z": "8b55b11b32e064ac",
-    "name": "Trames rejetées (CRC)",
-    "active": false,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "statusVal": "",
-    "statusType": "auto",
-    "x": 680,
-    "y": 205,
-    "wires": []
   }
 ]

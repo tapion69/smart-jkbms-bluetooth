@@ -345,6 +345,46 @@ class MQTTTests(unittest.TestCase):
             self.assertFalse(m.permission[A])
         asyncio.run(run())
 
+    def test_v024_prune_duplicates_raw_masks_and_retained_entities(self):
+        from mqtt_ha import RETIRED_SENSOR_KEYS, RETIRED_BINARY_KEYS
+        from parameters import BY_KEY
+        m,c=self.instance()
+        m.on_connect(c,None,None,0,None)
+        for mac in (A,B):
+            root=m.discovery+"/sensor/"+short_id(mac)+"_"
+            for key in ("nominal_capacity_ah","cell_count",
+                        "cell_wire_warning_mask","temperature_sensor_absent_mask",
+                        "error_mask_hex","controls_hex","battery_type_id",
+                        "charge_status_id","dry_contact_mask","uart1_protocol",
+                        "uart3_protocol","balance_action","vendor_id"):
+                self.assertIn(key,RETIRED_SENSOR_KEYS)
+                self.assertIn((root+key+"/config","",1,True),c.published,
+                              "Obsolete HA retained discovery not deleted: "+key)
+            self.assertIn("balancing_active",RETIRED_BINARY_KEYS)
+            self.assertIn(
+                (m.discovery+"/binary_sensor/"+short_id(mac)+
+                 "_balancing_active/config","",1,True),c.published)
+        m.ingest(sample_data(A))
+        payload=json.loads([p for t,p,_,_ in c.published
+                            if t==m.base(A)+"/state"][-1])
+        for removed_key in ("nominal_capacity_ah","cell_count",
+                            "error_mask_hex","cell_wire_warning_mask",
+                            "temperature_sensor_absent_mask","controls_hex",
+                            "battery_type_id","balance_action","format",
+                            "uart1_protocol","vendor_id"):
+            self.assertNotIn(removed_key,payload)
+        for key in ("voltage_v","current_a","soc_pct","cell_01_v",
+                    "cell_16_v","cell_delta_v","cell_min_number","cell_max_number"):
+            self.assertIn(key,payload)
+        # The number entity alone owns its setting, no read-only clone sensor.
+        config={t:json.loads(p) for t,p,_,_ in c.published
+                if t.endswith("/config") and p}
+        self.assertIn(m.discovery+"/number/"+short_id(A)+
+                      "_cell_uvp_v/config",config)
+        self.assertNotIn(m.discovery+"/sensor/"+short_id(A)+
+                         "_cell_uvp_v/config",config)
+        self.assertEqual(len({x["unique_id"] for x in config.values()}),len(config))
+
     def test_precision_names_and_volts_delta_discovery(self):
         m,c=self.instance()
         m.discover(A,16)

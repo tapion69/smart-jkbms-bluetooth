@@ -14,7 +14,7 @@ jobs:
         run: |
           python -m json.tool repository.json >/dev/null
           python -m json.tool smart-jkbms-bluetooth/flows.json >/dev/null
-          python -m py_compile smart-jkbms-bluetooth/ble/bridge.py
+          python -m py_compile smart-jkbms-bluetooth/ble/bridge.py smart-jkbms-bluetooth/ble/mqtt_ha.py smart-jkbms-bluetooth/merge_flows.py
       - name: Validate YAML files
         run: |
           pip install 'PyYAML==6.0.2' 'bleak==3.0.2' 'paho-mqtt==2.1.0'
@@ -33,21 +33,9 @@ jobs:
         run: node tests/test_frame_assembler.js
       - name: JK02 decoder checks
         run: node tests/test_jk_decoder.js
-      - name: Quiet summary Debug checks
-        run: node tests/test_quiet_summary.js
-      - name: Per-BMS health debugging tests
-        run: node tests/test_health_diagnostics.js
-      - name: Compact per-BMS decoding diagnostics tests
-        run: node tests/test_short_diagnostics.js
-      - name: Raw temperature probe diagnostics checks
-        run: node tests/test_raw_temperature.js
-      - name: Read-only temperature monitoring switch tests
-        run: node tests/test_temperature_switch.js
       - name: MQTT Home Assistant discovery tests
         run: python -m unittest discover -s tests -p 'test_mqtt_ha.py' -v
       - name: Config parameter safety and register tests
         run: python -m unittest discover -s tests -p 'test_parameters.py' -v
       - name: Node-RED to MQTT publisher tests
         run: node tests/test_mqtt_flows.js
-      - name: Manual control Node-RED flow tests
-        run: node tests/test_temperature_control_flows.js

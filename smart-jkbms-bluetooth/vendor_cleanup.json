@@ -1,0 +1,236 @@
+[
+  {
+    "id": "e9d101defafdb611",
+    "type": "comment",
+    "name": "0.1.0 – BLE scan + raw diagnostics. No BMS write commands."
+  },
+  {
+    "id": "d4cb3acdbe43f291",
+    "type": "debug",
+    "name": "BLE raw and diagnostics"
+  },
+  {
+    "id": "7474b3a8e3186203",
+    "type": "comment",
+    "name": "Next: JK02 commands → frame reconstruction → decoding → MQTT"
+  },
+  {
+    "id": "b1e8a31ca20a9361",
+    "type": "comment",
+    "name": "0.1.4 – Lecture JK02 0x97 / 0x96, trames 300 octets, CRC"
+  },
+  {
+    "id": "5524471869b2e0af",
+    "type": "debug",
+    "name": "Trames JK02 valides (HEX)"
+  },
+  {
+    "id": "8d30a20107f452b3",
+    "type": "debug",
+    "name": "Trames rejetées (CRC)"
+  },
+  {
+    "id": "b150100000000008",
+    "type": "comment",
+    "name": "0.1.5 – Mesures expérimentales, aucun MQTT"
+  },
+  {
+    "id": "b150100000000005",
+    "type": "function",
+    "name": "Résumé 5s / batterie",
+    "func_length": 181,
+    "func_hash": "1420c8eb96f834ed"
+  },
+  {
+    "id": "b150100000000006",
+    "type": "debug",
+    "name": "Mesures batterie (à confirmer)"
+  },
+  {
+    "id": "b150100000000007",
+    "type": "debug",
+    "name": "Profil inconnu : raw_hex à envoyer"
+  },
+  {
+    "id": "f5500ba6100a0003",
+    "type": "comment",
+    "name": "0.1.7 – Résumé lisible / 10 s / batterie"
+  },
+  {
+    "id": "f5500ba6100a0001",
+    "type": "function",
+    "name": "Résumé lisible (10s / BMS)",
+    "func_length": 1501,
+    "func_hash": "9dec5590c6408099"
+  },
+  {
+    "id": "f5500ba6100a0002",
+    "type": "debug",
+    "name": "RÉSUMÉ JK-BMS (10 s) – SEUL DEBUG ACTIF"
+  },
+  {
+    "id": "b190021900000004",
+    "type": "comment",
+    "name": "0.1.9 – Bilan Bluetooth + trames + décodage par batterie"
+  },
+  {
+    "id": "b190021900000002",
+    "type": "inject",
+    "name": "Bilan chaque 20 s"
+  },
+  {
+    "id": "b190021900000001",
+    "type": "function",
+    "name": "État par BMS + pourquoi non décodé",
+    "func_length": 3754,
+    "func_hash": "d9a55f8e57b5db9e"
+  },
+  {
+    "id": "b190021900000003",
+    "type": "debug",
+    "name": "ÉTAT BMS 1 + BMS 2 (20 s)"
+  },
+  {
+    "id": "b111a90000000005",
+    "type": "comment",
+    "name": "0.1.11 – Diagnostic court : une raison par format"
+  },
+  {
+    "id": "b111a90000000003",
+    "type": "inject",
+    "name": "Diagnostic court / 20s"
+  },
+  {
+    "id": "b111a90000000002",
+    "type": "function",
+    "name": "État court et raison exacte du rejet",
+    "func_length": 3693,
+    "func_hash": "8e3301e1c69b0942"
+  },
+  {
+    "id": "b111a90000000004",
+    "type": "debug",
+    "name": "BMS1 / BMS2 - diagnostic lisible 20s"
+  },
+  {
+    "id": "b120001300000003",
+    "type": "comment",
+    "name": "0.1.13 – Températures JK02_32S brutes (lecture seule)"
+  },
+  {
+    "id": "b120001300000001",
+    "type": "function",
+    "name": "Identifier les températures brutes par BMS",
+    "func_length": 1695,
+    "func_hash": "5faeeebc16991530"
+  },
+  {
+    "id": "b120001300000002",
+    "type": "debug",
+    "name": "TEMPÉRATURES BRUTES JK02 (20 s)"
+  },
+  {
+    "id": "b121500000000004",
+    "type": "comment",
+    "name": "0.1.15 – État du switch de protection thermique (lecture seule)"
+  },
+  {
+    "id": "b121500000000001",
+    "type": "function",
+    "name": "Lire Disable Temp. Sensor (sans modification)",
+    "func_length": 1717,
+    "func_hash": "432d250885de3dbd"
+  },
+  {
+    "id": "b121500000000002",
+    "type": "debug",
+    "name": "SWITCH TEMPÉRATURES BMS1 / BMS2 (lecture seule)"
+  },
+  {
+    "id": "b161600000000001",
+    "type": "comment",
+    "name": "0.1.16 – Contrôle manuel protégé"
+  },
+  {
+    "id": "b161600000000002",
+    "type": "http in",
+    "name": "Page températures BMS"
+  },
+  {
+    "id": "b161600000000003",
+    "type": "function",
+    "name": "Charger page HTML",
+    "func_length": 53,
+    "func_hash": "ea225fad845f586b"
+  },
+  {
+    "id": "b161600000000004",
+    "type": "file in",
+    "name": "HTML switch"
+  },
+  {
+    "id": "b161600000000005",
+    "type": "function",
+    "name": "Headers page HTML",
+    "func_length": 297,
+    "func_hash": "62776d3fa4bae68b"
+  },
+  {
+    "id": "b161600000000006",
+    "type": "http response",
+    "name": "Afficher page"
+  },
+  {
+    "id": "b161600000000007",
+    "type": "http in",
+    "name": "API état"
+  },
+  {
+    "id": "b161600000000008",
+    "type": "function",
+    "name": "État vérifié par 0x01",
+    "func_length": 725,
+    "func_hash": "1f2642e14582ae39"
+  },
+  {
+    "id": "b161600000000009",
+    "type": "http response",
+    "name": "JSON état"
+  },
+  {
+    "id": "b161600000000010",
+    "type": "function",
+    "name": "Capturer réglage 0x01 et CRC",
+    "func_length": 735,
+    "func_hash": "cd1faeae201492f3"
+  },
+  {
+    "id": "b161600000000011",
+    "type": "http in",
+    "name": "API commande explicite"
+  },
+  {
+    "id": "b161600000000012",
+    "type": "function",
+    "name": "Valider commande + cible",
+    "func_length": 1207,
+    "func_hash": "974eee9708271264"
+  },
+  {
+    "id": "b161600000000013",
+    "type": "http request",
+    "name": "Serveur BLE interne"
+  },
+  {
+    "id": "b161600000000014",
+    "type": "function",
+    "name": "Résultat non confirmé",
+    "func_length": 299,
+    "func_hash": "b465fe1e40f1ee6f"
+  },
+  {
+    "id": "b161600000000015",
+    "type": "http response",
+    "name": "Résultat JSON"
+  }
+]

@@ -41,7 +41,6 @@ MEASURES = [
  ("discharge_power_w","Puissance de décharge","W","power","measurement",None),
  ("soc_pct","État de charge","%","battery","measurement",None),
  ("soh_pct","État de santé","%",None,"measurement","diagnostic"),
- ("cell_count","Nombre de cellules",None,None,"measurement","diagnostic"),
  ("cell_min_v","Cellule minimum","V","voltage","measurement",None),
  ("cell_max_v","Cellule maximum","V","voltage","measurement",None),
  ("cell_avg_v","Cellule moyenne","V","voltage","measurement",None),
@@ -49,60 +48,31 @@ MEASURES = [
  ("balance_current_a","Courant équilibrage","A","current","measurement",None),
  ("balance_state","Équilibrage",None,None,None,None),
  ("capacity_remaining_ah","Capacité restante","Ah",None,"measurement",None),
- ("nominal_capacity_ah","Capacité nominale","Ah",None,"measurement","diagnostic"),
  ("total_cycle_capacity_ah","Capacité cumulée cyclée","Ah",None,None,"diagnostic"),
  ("cycles","Cycles",None,None,"total_increasing","diagnostic"),
- ("total_runtime_h","Temps fonctionnement","h","duration","total_increasing","diagnostic"),
  ("temp1_c","Température sonde 1","°C","temperature","measurement",None),
  ("temp2_c","Température sonde 2","°C","temperature","measurement",None),
  ("mos_temp_c","Température MOS","°C","temperature","measurement",None),
  ("temp3_c","Température sonde 3","°C","temperature","measurement","diagnostic"),
  ("temp4_c","Température sonde 4","°C","temperature","measurement","diagnostic"),
  ("temp5_c","Température sonde 5","°C","temperature","measurement","diagnostic"),
- ("error_count","Alarmes actives","",None,"measurement","diagnostic"),
  ("alarm_text","Détail alarmes",None,None,None,"diagnostic"),
- ("error_mask_hex","Masque alarmes",None,None,None,"diagnostic"),
- ("temperature_quality","Qualité températures",None,None,None,"diagnostic"),
- ("format","Protocole BLE",None,None,None,"diagnostic"),
- ("cell_wire_warning_mask","Alertes câblage cellules",None,None,None,"diagnostic"),
- ("temperature_sensor_absent_mask","Masque sondes",None,None,None,"diagnostic"),
- ("balance_action","Action équilibrage",None,None,None,"diagnostic"),
  ("charge_status","Phase de charge",None,None,None,"diagnostic"),
- ("controls_hex","Contrôles BMS",None,None,None,"diagnostic"),
- ("cell_uvp_v","Seuil cellule UVP","V","voltage","measurement","diagnostic"),
- ("cell_ovp_v","Seuil cellule OVP","V","voltage","measurement","diagnostic"),
- ("balance_start_v","Début équilibrage","V","voltage","measurement","diagnostic"),
- ("max_charge_current_a","Courant charge maximum","A","current","measurement","diagnostic"),
- ("max_discharge_current_a","Courant décharge maximum","A","current","measurement","diagnostic"),
- ("vendor_id","Fabricant déclaré",None,None,None,"diagnostic"),
  ("hardware_version","Version matérielle",None,None,None,"diagnostic"),
  ("software_version","Version logicielle",None,None,None,"diagnostic"),
- ("device_uptime_h","Uptime BMS","h","duration","total_increasing","diagnostic"),
- ("uart1_protocol","Protocole UART1",None,None,None,"diagnostic"),
- ("uart2_protocol","Protocole UART2",None,None,None,"diagnostic"),
- ("can_protocol","Protocole CAN",None,None,None,"diagnostic"),
- ("uart3_protocol","Protocole UART3 (ID)",None,None,None,"diagnostic"),
  ("device_model","Modèle BMS",None,None,None,"diagnostic"),
  ("device_name","Nom du BMS",None,None,None,"diagnostic"),
  ("manufacturing_date","Date de fabrication",None,None,None,"diagnostic"),
  ("serial_number","Numéro de série",None,None,None,"diagnostic"),
  ("power_on_count","Nombre de démarrages",None,None,"total_increasing","diagnostic"),
  ("uart2_enabled","UART2 activé",None,None,None,"diagnostic"),
- ("lcd_buzzer_trigger_id","Déclencheur buzzer (ID)",None,None,None,"diagnostic"),
- ("dry1_trigger_id","Déclencheur DRY1 (ID)",None,None,None,"diagnostic"),
- ("dry2_trigger_id","Déclencheur DRY2 (ID)",None,None,None,"diagnostic"),
- ("uart_protocol_library_version","Bibliothèque UART (ID)",None,None,None,"diagnostic"),
- ("can_protocol_library_version","Bibliothèque CAN (ID)",None,None,None,"diagnostic"),
- ("data_stored_period","Période enregistrement (brut)",None,None,None,"diagnostic"),
  ("rcv_time_h","Durée tension RCV","h","duration","measurement","diagnostic"),
  ("rfv_time_h","Durée tension RFV","h","duration","measurement","diagnostic"),
  ("battery_type","Type batterie",None,None,None,"diagnostic"),
- ("battery_type_id","Type batterie (ID)",None,None,None,"diagnostic"),
  ("heating_current_a","Heating_Current","A","current","measurement","diagnostic"),
  ("smart_sleep_countdown_s","Smart_sleep_countdown","s","duration","measurement","diagnostic"),
  ("emergency_time_countdown_s","Emergency_countdown","s","duration","measurement","diagnostic"),
  ("charge_status_time_s","Charge_status_time","s","duration","measurement","diagnostic"),
- ("charge_status_id","charge_status",None,None,None,"diagnostic"),
  ("detail_log_count","Detail_log_count",None,None,None,"diagnostic"),
  ("total_runtime_formatted","Total_runtime_formatted",None,None,None,"diagnostic"),
  ("discharge_ocp_release_s","Discharge_OCP_recovery","s","duration","measurement","diagnostic"),
@@ -111,7 +81,6 @@ MEASURES = [
  ("charge_short_release_s","Charge_short_recovery","s","duration","measurement","diagnostic"),
  ("undervoltage_release_s","Undervoltage_recovery","s","duration","measurement","diagnostic"),
  ("overvoltage_release_s","Overvoltage_recovery","s","duration","measurement","diagnostic"),
- ("dry_contact_mask","Contacts secs (masque)",None,None,None,"diagnostic"),
 ]
 BINARY_MEASURES=[
  ("charging_mos","MOS charge"),
@@ -122,14 +91,44 @@ BINARY_MEASURES=[
  ("dry1_contact","DRY1 contact"),
  ("dry2_contact","DRY2 contact"),
  ("emergency_active","Emergency"),
- ("balancing_active","Switch_Balance (état réel)"),
  ("charger_connected","Chargeur branché"),
- ("pcl_module_active","Module PCL actif"),
 ]
-SETTING_KEYS={"controls_hex","cell_uvp_v","cell_ovp_v","balance_start_v",
-              "max_charge_current_a","max_discharge_current_a"}
-INFO_KEYS={"vendor_id","hardware_version","software_version","device_uptime_h",
-           "uart1_protocol","uart2_protocol","can_protocol"}
+# Explicit tombstones for retained discovery published by previous versions.
+RETIRED_SENSOR_KEYS = [
+    "nominal_capacity_ah",
+    "cell_count",
+    "total_runtime_h",
+    "error_count",
+    "error_mask_hex",
+    "temperature_quality",
+    "format",
+    "cell_wire_warning_mask",
+    "temperature_sensor_absent_mask",
+    "balance_action",
+    "controls_hex",
+    "cell_uvp_v",
+    "cell_ovp_v",
+    "balance_start_v",
+    "max_charge_current_a",
+    "max_discharge_current_a",
+    "vendor_id",
+    "device_uptime_h",
+    "uart1_protocol",
+    "uart2_protocol",
+    "can_protocol",
+    "uart3_protocol",
+    "lcd_buzzer_trigger_id",
+    "dry1_trigger_id",
+    "dry2_trigger_id",
+    "uart_protocol_library_version",
+    "can_protocol_library_version",
+    "data_stored_period",
+    "battery_type_id",
+    "charge_status_id",
+    "dry_contact_mask",
+    "cell_delta_mv"
+]
+RETIRED_BINARY_KEYS = ["balancing_active","pcl_module_active"]
 
 
 def short_id(mac: str) -> str:
@@ -278,15 +277,12 @@ def enrich(d: dict[str,Any], extras: dict[str,Any]) -> dict[str,Any] | None:
             ("smart_sleep_countdown_s",0,4294967295),
             ("charge_status_time_s",0,65535),
             ("detail_log_count",0,4294967295),
-            ("battery_type_id",0,2),
-            ("charge_status_id",0,2),
             ("discharge_ocp_release_s",0,65535),
             ("discharge_short_release_s",0,65535),
             ("charge_ocp_release_s",0,65535),
             ("charge_short_release_s",0,65535),
             ("undervoltage_release_s",0,65535),
             ("overvoltage_release_s",0,65535),
-            ("dry_contact_mask",0,255),
         ):
             val=numeric(extras.get(k),low,high)
             if val is not None:out[k]=val
@@ -481,10 +477,8 @@ class HomeAssistantMQTT:
         names={
           "voltage_v":"Tension_Totale_volt","current_a":"Courant_total",
           "power_w":"Puissance_Totale","soc_pct":"SOC_pourcentage",
-          "soh_pct":"SOH_pourcentage","capacity_remaining_ah":"Capacite_restante_Ah",
-          "nominal_capacity_ah":"Capacite_batterie_Ah","cycles":"Nombre_Cycle",
-          "total_cycle_capacity_ah":"Cycle_Capacite_Ah",
-          "cell_count":"cell_count_used","cell_min_v":"cell_voltage_min_value",
+          "soh_pct":"SOH_pourcentage","capacity_remaining_ah":"Capacite_restante_Ah","cycles":"Nombre_Cycle",
+          "total_cycle_capacity_ah":"Cycle_Capacite_Ah","cell_min_v":"cell_voltage_min_value",
           "cell_max_v":"cell_voltage_max_value","cell_avg_v":"cell_voltage_average",
           "cell_delta_v":"cell_voltage_delta","cell_min_number":"cell_voltage_min_number",
           "cell_max_number":"cell_voltage_max_number",
@@ -493,7 +487,6 @@ class HomeAssistantMQTT:
           "temp3_c":"Sonde_3_temp","temp4_c":"Sonde_4_temp",
           "temp5_c":"Sonde_5_temp",
           "alarm_active":"BMS Alarm Active","alarm_text":"BMS Alarm List",
-          "balance_action":"Balance_Action",
           "dry1_contact":"DRY1 contact",
           "dry2_contact":"DRY2 contact",
           "heating_current_a":"Heating_Current",
@@ -601,14 +594,14 @@ class HomeAssistantMQTT:
 
     def rediscover(self)->None:
         for mac in self.addresses:
-            root=self.base(mac);identity=short_id(mac)
-            # Cleanup obsolete retained v0.2.1 discovery so HA does not
-            # display duplicate sensor/number entities or the old 30s button.
-            for key in ("cell_delta_mv", "cell_uvp_v","cell_ovp_v",
-                        "balance_start_v","max_charge_current_a","max_discharge_current_a"):
+            identity=short_id(mac)
+            # Remove retained v0.2.3 discovery entries without deleting valid
+            # measurements or the stable per-MAC Home Assistant device.
+            for key in RETIRED_SENSOR_KEYS:
                 self.send(f"{self.discovery}/sensor/{identity}_{key}/config","")
+            for key in RETIRED_BINARY_KEYS:
+                self.send(f"{self.discovery}/binary_sensor/{identity}_{key}/config","")
             self.send(f"{self.discovery}/button/{identity}_arm_temperature_control/config","")
-            self.send(f"{self.discovery}/switch/{identity}_disable_temperature_sensors/config","")
             self.discover(mac,max(16,self.discovered_cells.get(mac,16)))
             self.emit(mac,"write_permission/state","OFF")
             self.emit(mac,"availability","offline")
@@ -620,7 +613,13 @@ class HomeAssistantMQTT:
 
     def full_state(self,mac:str)->dict[str,Any]:
         result={**self.info.get(mac,{}),**self.settings.get(mac,{}),**self.state.get(mac,{})}
-        return result
+        keys={m[0] for m in MEASURES}
+        keys.update(m[0] for m in BINARY_MEASURES)
+        keys.update(p.key for p in PARAMS)
+        keys.update(("cell_delta_v","cell_min_number","cell_max_number"))
+        for index in range(1,33):
+            keys.update((f"cell_{index:02d}_v",f"cell_{index:02d}_resistance_ohm"))
+        return {key:value for key,value in result.items() if key in keys}
 
     def _temps_available(self,mac:str,data:dict[str,Any])->None:
         for k in ("temp1_c","temp2_c","mos_temp_c","temp3_c","temp4_c","temp5_c"):
