@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Version 0.2.7 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
+**Version 0.2.8 — experimental JK02 BLE integration with Home Assistant MQTT Discovery.**
 
 Connect JK-BMS batteries by Bluetooth (BLE) to Home Assistant, with one stable MQTT device per configured BMS. The two devices keep their MAC-based unique IDs. Supports independently connected JK02_24S and JK02_32S telemetry profiles; these names describe the frame layout, not the number of cells connected.
 
@@ -34,7 +34,7 @@ There are only three packaged files, with **no packaged Debug, Inject timer or o
 
 `merge_flows.py` performs an idempotent update. It removes **unmodified vendor-owned legacy** debug/HTML/inject functions via `vendor_cleanup.json` and fixes their wires, but never deletes your own nodes or a renamed / modified old function. Existing custom Node-RED content is preserved, with a dated `/data/node-red/flows.json.*.bak` backup before changes. If you have manually connected a custom node to a retired vendor node, that dependency is preserved and logged.
 
-The old `/jk-bms/temperature` HTML interface is removed. Home Assistant MQTT **Configuration** already exposes the parameter controls and the per-BMS `Autoriser modification paramètres` switch.
+The old `/jk-bms/temperature` HTML interface is removed. Home Assistant MQTT **Configuration** already exposes the parameter controls and the per-BMS `Allow Parameter Changes` switch.
 
 ## Configuration
 
@@ -58,7 +58,7 @@ Replace MAC addresses and MQTT credentials with your own. Never publish private 
 
 ## Home Assistant organization
 
-**Measurements** — voltage, signed current, power, charging/discharging power, SOC, remaining capacity, balancing, cell 1–16 voltage, min/max/average and delta, and available temperature probes. Cell voltages and delta are shown with **3 decimals**, battery voltage with **1 decimal**, delta in **V**.
+**Measurements** — voltage, signed current, power, charging/discharging power, SOC, remaining capacity, balancing, cell 1–16 voltage, min/max/average and delta, and available temperature probes. Cell voltages and delta are shown with **3 decimals**, battery voltage with **2 decimals**, delta in **V**.
 
 **Configuration** — one `number` or `switch` per allowlisted JK02 setting, **not** a second read-only sensor showing the same setting. `Autoriser modification paramètres` is OFF by default and resets to OFF on reconnect. The add-on-wide option `allow_temperature_control: true` must also be explicitly enabled before manual writes. A setting change is not reported as accepted until the BMS sends verified type-0x01 configuration readback; writes require fresh telemetry and config state.
 
@@ -127,3 +127,14 @@ All **MQTT entity names** are now defined in a centralized English catalog (`ble
 An old `uart2_enabled` *sensor* discovery topic is explicitly tombstoned before the same state becomes a proper read-only **binary sensor**. All other existing entity IDs keep their MQTT Discovery identifiers. No device deletion is necessary.
 
 **Limits:** MQTT Discovery cannot forcibly override entity names manually customized in Home Assistant's Entity Registry, nor can it force an exact visual order of native cards. Settings for an unavailable BMS remain unknown until a verified settings frame is received. User data, BLE passwords, HEX flags and raw diagnostic fields are not published.
+
+## v0.2.8 — Clean MQTT labels and adjacent cell pairs
+
+- Removed artificial leading numbers from all information, status and measurement display labels; English names remain fixed and MAC-based MQTT unique IDs and entity IDs are unchanged.
+- In the Sensors group, `Min Cell Voltage` sorts immediately before `Min Cell Voltage - Cell Number`, and the Max pair follows the same convention.
+- Individual readings use `Cell 01 Voltage` followed by `Cell 01 Voltage - Resistance`, then the next cell. Cell voltage and resistance retain their 3-decimal display precision.
+- Total Voltage is formatted to two decimal digits in the MQTT numeric value template, with suggested display precision 2. Home Assistant user-defined per-entity precision overrides the integration suggestion: if the device page still shows `51,0 V`, open that entity's Settings and change its display precision to 2 (or reset the override). The underlying telemetry and history remain numeric and unchanged.
+- Cycles and SOH remain ordinary Sensors; editable parameters, confirmed switch-state diagnostics, BLE decoding, protective write checks and per-BMS identifiers are untouched.
+- Home Assistant decides the native entity-list order; MQTT Discovery cannot enforce an arbitrary overall order without artificial sort prefixes. Use a Lovelace Entities card for an exact custom sequence.
+
+After upgrading, restart the add-on so retained MQTT Discovery labels refresh. Manually overridden HA names may require a reset to the integration-provided name; no entity deletion should be required.
