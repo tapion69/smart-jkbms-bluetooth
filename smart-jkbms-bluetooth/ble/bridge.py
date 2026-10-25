@@ -641,7 +641,7 @@ async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
                 # The foreign AcquireNotify owner must release FFE1. Scanning,
                 # reconnecting or resetting hci0 cannot safely steal the lock.
                 reserved = {mac for mac, device in cached.items()
-                            if device.details.get("notify_acquired")}
+                            if getattr(device, "details", {}).get("notify_acquired")}
                 for mac in reserved:
                     retry_at[mac] = time.monotonic() + 60
                     cached.pop(mac)
