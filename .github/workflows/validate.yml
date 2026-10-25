@@ -35,3 +35,5 @@ jobs:
         run: node tests/test_jk_decoder.js
       - name: Quiet summary Debug checks
         run: node tests/test_quiet_summary.js
+      - name: Per-BMS health debugging tests
+        run: node tests/test_health_diagnostics.js

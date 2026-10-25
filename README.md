@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.8. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.9. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.8 development milestone
+## Included in v0.1.9 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -119,3 +119,9 @@ Each configured BMS is assigned **at most one** persistent BLE session, using it
 The manager **does not perform BLE discovery when all configured BMS are connected**. It scans again only for missing or disconnected BMS, with independent reconnect delays of 10 to 120 seconds on repeated early failures. A BMS that reports only the non-telemetry `AT\\r\\n` messages triggers a read-only handshake refresh after 45 seconds without any actual BLE data; if still silent at 90 seconds the manager reconnects that BMS only. All active session tasks are cancelled cleanly when the add-on stops. The optional host adapter reset remains **off by default** and is never performed as part of routine reconnection.
 
 Operational state is available as Node-RED events: `session_persistent`, `stream_refresh`, `stream_stale`, `reconnect_scheduled`, `connected`, `disconnected`, and `device_not_seen`. Debug traces remain opt-in; the single summary Debug reports measurements every 10 seconds per BMS. Values remain provisional until checked against physical BMS readings. If parallel connections do not work reliably on a particular HA Bluetooth adapter, switch **persistent_connections: false** and restart the add-on.
+
+## Per-BMS decoding diagnostics (v0.1.9)
+
+If the BLE logs show that a BMS is connected but **only another battery appears in the 10-second measurements**, this release differentiates four independent stages for each MAC address: Bluetooth connected, JK02 type-0x02 frame assembled with valid CRC, JK02_24S/JK02_32S layout plausibility check, and finally a decoded record. The **ÉTAT BMS 1 + BMS 2 (20 s)** Debug in **JK-BMS | Mesures** displays one text line per BMS every 20 seconds. It reports specific failures (cell bitmask, cell voltage, sum-of-cells versus pack voltage, invalid SOC, unexpected temperature), without flooding the Debug sidebar or exposing full HEX automatically.
+
+There is **no automatic relaxation** of validation for a failing BMS, no MQTT publication of rejected measurements, and **no change to Bluetooth or polling behavior** from 0.1.8. The three feed connections (Bluetooth lifecycle events, verified JK02 frames and successful decoder output) are appended non-destructively to existing user flows with a timestamped backup. Original Debug nodes remain off by default, but can be enabled manually. To diagnose a rejected battery, send the `ÉTAT BMS 1 + BMS 2 (20 s)` lines; if required, temporarily enable the full HEX Debug for one frame only.

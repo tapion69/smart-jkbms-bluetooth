@@ -107,6 +107,31 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertIn("f5500ba6100a0001",by_id["b150100000000004"]["wires"][0])
 
 
+    def test_add_per_bms_health_diagnostics_to_existing_flows(self):
+        health = ROOT / "smart-jkbms-bluetooth" / "health_flows.json"
+        summary = ROOT / "smart-jkbms-bluetooth" / "summary_flows.json"
+        base = (
+            json.loads(PACKAGED.read_text())
+            + json.loads(DECODER.read_text())
+            + json.loads(summary.read_text())
+        )
+        custom = {"id":"my_preexisting_custom_node","type":"comment","z":"b150100000000001","name":"Don't alter"}
+        base.append(custom)
+        with tempfile.TemporaryDirectory() as td:
+            target=Path(td)/"flows.json"
+            target.write_text(json.dumps(base))
+            mod.merge(target, PACKAGED, DECODER, summary, health)
+            upgraded=json.loads(target.read_text())
+            by_id={node["id"]:node for node in upgraded}
+            self.assertEqual(by_id[custom["id"]],custom)
+            for origin in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
+                self.assertIn("b190021900000001",by_id[origin]["wires"][0])
+            self.assertTrue(by_id["b190021900000003"]["active"])
+            self.assertFalse(by_id["5524471869b2e0af"]["active"])
+            self.assertEqual(mod.merge(target, PACKAGED, DECODER, summary, health),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()

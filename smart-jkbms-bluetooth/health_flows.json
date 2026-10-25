@@ -1,0 +1,73 @@
+[
+  {
+    "id": "b190021900000004",
+    "type": "comment",
+    "z": "b150100000000001",
+    "name": "0.1.9 – Bilan Bluetooth + trames + décodage par batterie",
+    "info": "Debug 20s par BMS, indique pourquoi une trame JK02 valide est rejetée. Ne change ni les connexions ni les réglages des BMS.",
+    "x": 455,
+    "y": 435,
+    "wires": []
+  },
+  {
+    "id": "b190021900000002",
+    "type": "inject",
+    "z": "b150100000000001",
+    "name": "Bilan chaque 20 s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "20",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 8,
+    "topic": "",
+    "payload": "health_tick",
+    "payloadType": "str",
+    "x": 200,
+    "y": 510,
+    "wires": [
+      [
+        "b190021900000001"
+      ]
+    ]
+  },
+  {
+    "id": "b190021900000001",
+    "type": "function",
+    "z": "b150100000000001",
+    "name": "État par BMS + pourquoi non décodé",
+    "func": "// Diagnostic BLE/JK02 par batterie. Lecture seule, aucune publication MQTT.\nconst d=msg.payload||{};\nconst now=Date.now();\nconst all=context.get(\"bms_health_v1\")||{};\nconst mac=String(d.address||\"\").toUpperCase();\nfunction get(addr){\n if(!all[addr]) all[addr]={name:\"\",rssi:null,connected:false,connectedAt:0,\n  frames:0,decodes:0,lastFrameAt:0,lastDecodeAt:0,lastType:null,lastSeq:null,\n  profileChecks:[],lastError:\"\"};\n return all[addr];\n}\nconst profiles=[\n{name:\"24S\",n:24,mask:54,voltage:118,current:126,soc:141,t1:130,t2:132,mos:134},\n{name:\"32S\",n:32,mask:70,voltage:150,current:158,soc:173,t1:162,t2:164,mos:144}\n];\nfunction diagnose(hex){\n const b=Buffer.from(hex,\"hex\");\n if(b.length!==300||b.subarray(0,4).toString(\"hex\")!==\"55aaeb90\")\n   return [\"trame mal formée\"];\n const ret=[];\n for(const p of profiles){\n  const reasons=[], mask=b.readUInt32LE(p.mask),cells=[];\n  for(let i=0;i<p.n;i++) if((mask>>>i)&1)cells.push(b.readUInt16LE(6+2*i)/1000);\n  const count=cells.length,pack=b.readUInt32LE(p.voltage)/1000,\n        sum=cells.reduce((a,v)=>a+v,0),soc=b[p.soc],\n        current=b.readInt32LE(p.current)/1000;\n  const temps=[p.t1,p.t2,p.mos].map(x=>b.readInt16LE(x)/10);\n  if(count<4)reasons.push(\"cellules=\"+count);\n  if(cells.some(v=>v<1.5||v>4.5))reasons.push(\"tension cellule invalide\");\n  if(pack<5||pack>170)reasons.push(\"tension pack=\"+pack.toFixed(1)+\"V\");\n  if(Math.abs(sum-pack)>Math.max(1.5,pack*0.04))\n    reasons.push(\"somme=\"+sum.toFixed(2)+\"V / pack=\"+pack.toFixed(2)+\"V\");\n  if(soc>100)reasons.push(\"SOC=\"+soc);\n  if(Math.abs(current)>3000)reasons.push(\"courant aberrant\");\n  if(temps.some(t=>t< -80||t>160))reasons.push(\"température aberrante\");\n  ret.push(p.name+\":\"+(reasons.length?reasons.join(\", \"):\n    \"plausible \"+count+\" cellules \"+pack.toFixed(2)+\"V SOC \"+soc+\"%\"));\n }\n return ret;\n}\nif(mac){\n const s=get(mac);\n if(d.type===\"device_found\"){\n   s.name=d.name||s.name; if(Number.isFinite(Number(d.rssi)))s.rssi=Number(d.rssi);\n }else if(d.type===\"connected\"){\n   s.connected=true; s.connectedAt=now;s.lastError=\"\";\n   s.lastFrameAt=0;s.lastDecodeAt=0;s.profileChecks=[];\n }else if(d.type===\"disconnected\"){\n   s.connected=false;\n }else if(d.type===\"connection_error\"||d.type===\"stream_stale\"){\n   s.lastError=String(d.error||d.type);\n }else if(d.type===2&&d.crc_ok===true){\n   s.frames++;s.lastFrameAt=now;s.lastType=2;s.lastSeq=d.sequence;\n   if(typeof d.raw_hex===\"string\"&&d.raw_hex.length===600)\n     s.profileChecks=diagnose(d.raw_hex);\n }else if(d.validation===\"provisional_compare_with_BatMON\"&&d.source_crc_ok===true){\n   s.decodes++;s.lastDecodeAt=now;s.format=d.format||\"?\";\n   s.voltage=d.voltage_v;s.soc=d.soc_pct;\n }\n context.set(\"bms_health_v1\",all);\n return null;\n}\nif(d!==\"health_tick\") return null;\nconst messages=[];\nfor(const addr of Object.keys(all).sort()){\n const s=all[addr],tail=addr.slice(-5);\n let status=s.connected?\"connecté\":\"déconnecté\";\n let frame=s.lastFrameAt?(\"trame CRC OK il y a \"+Math.floor((now-s.lastFrameAt)/1000)+\"s\"):\"aucune trame type 2 reçue\";\n let decoding=s.lastDecodeAt?(\"décodage \"+s.format+\" il y a \"+Math.floor((now-s.lastDecodeAt)/1000)+\"s\"):\n   (s.lastFrameAt?\"TRAME REÇUE MAIS NON DÉCODÉE\":\"pas de mesure décodée\");\n let reasons=(!s.lastDecodeAt&&s.lastFrameAt&&s.profileChecks.length)?\n   \" | \"+s.profileChecks.join(\" ; \"):\"\";\n let name=s.name&&s.name!==\"Unknown\"?s.name:\"BMS \"+tail;\n let line=name+\" [\"+tail+\"] | BLE \"+status+\n   (s.rssi===null?\"\":\" \"+s.rssi+\" dBm\")+\" | \"+frame+\" | \"+decoding+reasons;\n if(s.lastError)line+=\" | erreur=\"+s.lastError;\n messages.push({topic:\"jk/\"+addr+\"/diagnostic\",payload:line});\n}\nif(!messages.length) return null;\nnode.status({fill:\"blue\",shape:\"dot\",text:messages.length+\" batterie(s) supervisée(s)\"});\nreturn [messages];",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 510,
+    "wires": [
+      [
+        "b190021900000003"
+      ]
+    ]
+  },
+  {
+    "id": "b190021900000003",
+    "type": "debug",
+    "z": "b150100000000001",
+    "name": "ÉTAT BMS 1 + BMS 2 (20 s)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 790,
+    "y": 510,
+    "wires": []
+  }
+]

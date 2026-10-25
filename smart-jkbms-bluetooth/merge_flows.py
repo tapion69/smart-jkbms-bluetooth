@@ -46,6 +46,9 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         ("136f1472850339d1", "77930ff9204bec01"),
         ("65ad8ac512b5e001", "b150100000000002"),
         ("b150100000000004", "f5500ba6100a0001"),
+        ("136f1472850339d1", "b190021900000001"),
+        ("65ad8ac512b5e001", "b190021900000001"),
+        ("b150100000000004", "b190021900000001"),
     )
     packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
     for source_id, target_id in links:
