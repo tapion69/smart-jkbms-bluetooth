@@ -21,18 +21,19 @@ export BLE_BRIDGE_TOKEN="$(cat /data/.ble_bridge_token)"
 
 # Merge new vendor nodes without overwriting existing user flows.
 # A backup is made whenever an update adds nodes or a link.
- /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/mqtt_flows.json
+ /opt/venv/bin/python /addon/merge_flows.py "$WORKDIR/flows.json" /addon/flows.json /addon/decoder_flows.json /addon/mqtt_flows.json /addon/bip_flows.json
 
 # User flows are never overwritten on startup or update.
 export NODE_PATH="$(npm root -g)"
 export BLE_BRIDGE_ENDPOINT="http://127.0.0.1:1895/internal/ble/events"
 export BLE_OPTIONS_FILE="$OPTIONS"
 export BLE_BMS_ADDRESSES="$(jq -r '.bms_addresses // ""' "$OPTIONS")"
-export BLE_TEMP_CONTROL_ENABLED="$(jq -r '.allow_temperature_control // false' "$OPTIONS")"
 export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
 # Persistent anonymous UUID prepared locally. No BIP HTTP requests are made yet.
 export SMART_JKBMS_INSTALL_ID="$(/opt/venv/bin/python /addon/ble/installation_id.py)"
-export SMART_JKBMS_VERSION="0.3.0"
+export SMART_JKBMS_VERSION="0.3.1"
+export SEND_BIP="$(jq -r '(.send_bip // false) | if . == true then "true" else "false" end' "$OPTIONS")"
+export SMART_JKBMS_BIP_ENDPOINT="$(jq -r '.bip_endpoint // ""' "$OPTIONS")"
 
 NR_PID=""
 BLE_PID=""
@@ -46,7 +47,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.3.0"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.3.1"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting lightweight JK02 decoder and BLE-to-MQTT bridge"
 
