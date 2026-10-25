@@ -89,6 +89,22 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     packaged_by_id = {n.get("id"): n for n in base if isinstance(n, dict)}
     additions = [n for n in base if n["id"] not in by_id]
     updated_functions = update_stock_functions(by_id, packaged_by_id)
+    # Make the effective running decoder version visible in the add-on startup
+    # log, rather than relying on the add-on version number or old flow comments.
+    decoder = by_id.get("b150100000000004", {})
+    packaged_decoder = packaged_by_id.get("b150100000000004", {})
+    installed_code = decoder.get("func") if isinstance(decoder, dict) else None
+    packaged_code = packaged_decoder.get("func") if isinstance(packaged_decoder, dict) else None
+    if isinstance(installed_code, str) and installed_code == packaged_code:
+        print("[INFO] JK02 decoder active: current v0.1.12 temperature fallback")
+    elif isinstance(installed_code, str):
+        old_size, old_fingerprint = STOCK_FUNCTIONS_0111["b150100000000004"]
+        if len(installed_code) == old_size and legacy_fingerprint(installed_code) == old_fingerprint:
+            print("[WARN] JK02 decoder active: legacy v0.1.11; temperature fallback not installed")
+        else:
+            print("[WARN] JK02 decoder active: customized/unrecognized Function; upgrade preserved it")
+    else:
+        print("[WARN] JK02 decoder not installed yet")
     changed = bool(additions or updated_functions)
 
     # Append vendor links only; never replace custom source nodes or wires.
@@ -102,6 +118,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         ("136f1472850339d1", "b111a90000000002"),
         ("65ad8ac512b5e001", "b111a90000000002"),
         ("b150100000000004", "b111a90000000002"),
+        ("65ad8ac512b5e001", "b120001300000001"),
     )
     packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
     for source_id, target_id in links:

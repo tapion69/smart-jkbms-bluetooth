@@ -39,3 +39,5 @@ jobs:
         run: node tests/test_health_diagnostics.js
       - name: Compact per-BMS decoding diagnostics tests
         run: node tests/test_short_diagnostics.js
+      - name: Raw temperature probe diagnostics checks
+        run: node tests/test_raw_temperature.js

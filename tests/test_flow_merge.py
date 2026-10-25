@@ -199,6 +199,33 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_raw_temperature_diagnostic_added_without_overwriting_existing(self):
+        raw = ROOT / "smart-jkbms-bluetooth" / "raw_temperature_flows.json"
+        sources = (
+            PACKAGED,
+            DECODER,
+            ROOT / "smart-jkbms-bluetooth" / "summary_flows.json",
+            ROOT / "smart-jkbms-bluetooth" / "health_flows.json",
+            ROOT / "smart-jkbms-bluetooth" / "short_diagnostics_flows.json",
+            raw,
+        )
+        original = [dict(n) for source in sources[:-1] for n in json.loads(source.read_text())]
+        user_node = {"id":"user_custom","type":"comment","name":"Do not change","z":"b150100000000001"}
+        original.append(user_node)
+        assembler = next(n for n in original if n["id"]=="65ad8ac512b5e001")
+        assembler["wires"][0] = ["5524471869b2e0af"]
+        with tempfile.TemporaryDirectory() as td:
+            dst = Path(td) / "flows.json"
+            dst.write_text(json.dumps(original))
+            mod.merge(dst, *sources)
+            by_id = {n["id"]: n for n in json.loads(dst.read_text())}
+            self.assertEqual(by_id["user_custom"],user_node)
+            self.assertIn("b120001300000001",by_id["65ad8ac512b5e001"]["wires"][0])
+            self.assertTrue(by_id["b120001300000002"]["active"])
+            self.assertEqual(mod.merge(dst,*sources),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()
