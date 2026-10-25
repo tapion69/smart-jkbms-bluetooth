@@ -16,13 +16,16 @@ configuration:
     description: Comma-separated MAC addresses; leave empty for discovery only.
   connection_probe_seconds:
     name: Connection probe duration (seconds)
-    description: Read-only Bluetooth connection without JK-BMS polling commands.
+    description: Duration of legacy short probe sessions. The standard persistent mode retrieves settings and measurements automatically.
   persistent_connections:
     name: Persistent independent BMS Bluetooth connections
     description: Keep each battery connected and reconnect independently. Disable for legacy short connections.
-  read_only_requests:
-    name: JK-BMS read-only requests
-    description: Send only 0x97 and 0x96 read requests; never change BMS settings.
+  allow_parameter_changes:
+    name: Allow BMS parameter changes (master safety)
+    description: Off by default. Both this option and the per-BMS Home Assistant permission switch must be on to write settings; otherwise read-only monitoring continues.
+  send_bip:
+    name: Anonymous installation BIP (under development)
+    description: Reserved for voluntary installation telemetry. The collector is not active in this preview; keep this option off.
   adapter_reset_on_start:
     name: Reset Bluetooth controller on startup
     description: Off by default. Disconnects all devices using this controller. Select hci0/hci1/hci2/hci3 explicitly, not auto.
