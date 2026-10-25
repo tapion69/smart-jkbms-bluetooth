@@ -257,6 +257,37 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),0)
 
 
+    def test_temp_switch_upgrade_preserves_existing_user_flows(self):
+        base_dir = ROOT / "smart-jkbms-bluetooth"
+        packages = [PACKAGED, DECODER,
+            base_dir / "summary_flows.json",
+            base_dir / "health_flows.json",
+            base_dir / "short_diagnostics_flows.json",
+            base_dir / "raw_temperature_flows.json",
+            base_dir / "temperature_switch_flows.json"]
+        installed_flows = [
+            node for file in packages[:-1] for node in json.loads(file.read_text())
+        ]
+        assembler = next(n for n in installed_flows if n["id"] == "65ad8ac512b5e001")
+        assembler["wires"][0] = [
+            n for n in assembler["wires"][0] if n != "b121500000000001"
+        ]
+        custom = {"id":"custom_switch","type":"function","z":"b150100000000001",
+                  "name":"My user function","func":"return msg;","wires":[[]]}
+        installed_flows.append(custom)
+        with tempfile.TemporaryDirectory() as td:
+            dst = Path(td) / "flows.json"
+            dst.write_text(json.dumps(installed_flows))
+            mod.merge(dst,*packages)
+            merged = {n["id"]:n for n in json.loads(dst.read_text())}
+            self.assertEqual(merged[custom["id"]],custom)
+            self.assertTrue(merged["b121500000000002"]["active"])
+            self.assertIn("b121500000000001",
+                          merged["65ad8ac512b5e001"]["wires"][0])
+            self.assertEqual(mod.merge(dst,*packages),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()

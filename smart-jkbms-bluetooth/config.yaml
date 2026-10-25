@@ -1,5 +1,5 @@
 name: Smart JK-BMS Bluetooth (Development)
-version: "0.1.14"
+version: "0.1.15"
 slug: smart_jkbms_ble
 description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
 startup: services

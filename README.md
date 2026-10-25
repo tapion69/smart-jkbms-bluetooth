@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.14. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.15. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.14 development milestone
+## Included in v0.1.15 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -169,3 +169,11 @@ Previously v0.1.12 rejected a valid pack when more than one of T1/T2/MOS was inv
 **Do not use these missing temperatures to control charging, cooling, safety interlocks, overheat/undercool alarms or battery protection.** The BMS's own onboard protections must remain independent. Before Home Assistant MQTT Discovery, compare the electrical measurements and the physical sensor status to BatMON/the JK app on BMS 1.
 
 The non-destructive startup migrator upgrades only an **exactly unchanged stock v0.1.11 or v0.1.12/v0.1.13 decoder**. Customized function code is never overwritten, with a startup warning instead. The code remains independent of the syssi implementation.
+
+## Temperature monitoring switch: read-only JK02_32S (v0.1.15)
+
+The `Disable Temp. Sensor` JK02_32S **configuration flag** is read from the checksum-verified **0x01 SETTINGS frame**, unsigned little-endian bitmask at bytes 282–283, bit 1 (`0x0002`). The blueprints in [syssi/esphome-jk-bms](https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md) confirm that this is separate from the `0x02` STATUS frame's unrelated sensor absence mask at byte 214. **ON means temperature monitoring is disabled; OFF means enabled**. A BLE read-only request `0x96` already produces these settings frames, so v0.1.15 adds no request, no BMS setting write, and no MQTT publishing.
+
+In **JK-BMS | Mesures**, the new **SWITCH TEMPÉRATURES BMS1 / BMS2 (lecture seule)** Debug shows one line per configured BMS, rate-limited to once per minute unless the flag changes. It includes the address, current `Disable Temp. Sensor` flag, interpreted status, and raw bitmask `reg282`. The new Node-RED Function accepts only a correctly addressed, 300-byte, header- and checksum-verified settings frame (`type: 1`), not fragmented BLE events, and never exposes a clickable switch that would change the BMS.
+
+**Safety:** do not toggle this protection automatically. One temperature probe was physically cut on BMS 1; disabling the monitoring can remove temperature-related battery protections and does NOT guarantee that Modbus/RS485 responses will start working. RS485 `00 00` responses from the old add-on are not 300-byte telemetry frames. Check physical wiring and the RS485 protocol separately before enabling/disabling protection functions.

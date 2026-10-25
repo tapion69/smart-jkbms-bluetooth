@@ -41,3 +41,5 @@ jobs:
         run: node tests/test_short_diagnostics.js
       - name: Raw temperature probe diagnostics checks
         run: node tests/test_raw_temperature.js
+      - name: Read-only temperature monitoring switch tests
+        run: node tests/test_temperature_switch.js
