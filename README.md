@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="Smart JK-BMS Bluetooth logo" width="135">
+</p>
+
 # Smart JK-BMS Bluetooth for Home Assistant
 
 **Development preview — v0.3.0. Testers wanted!**
@@ -9,7 +13,7 @@ An experimental, community-tested Home Assistant add-on for monitoring multiple 
 ## Features
 
 - One Home Assistant MQTT device per configured JK-BMS, identified by its stable Bluetooth address
-- Multiple independent BLE sessions, with independent reconnection for each BMS
+- Multiple independent BLE sessions, with independent reconnection for each BMS. There is **no coded limit of two BMS**: you can list three or more Bluetooth addresses, subject to host adapter/connection capacity and hardware testing.
 - Pack SOC, voltage, current, charge/discharge power, cell average/min/max/delta, cell voltages and available wire resistances
 - Cycle count, SOH, runtime, temperatures, alarm states and confirmed configuration values where the BMS actually provides them
 - Available settings exposed through native HA controls, protected by explicit authorization, validated JK02 registers and verified BMS readback
@@ -28,7 +32,7 @@ Currently tested with JK02 Bluetooth frame formats. `JK02_24S` and `JK02_32S` de
 - The **Mosquitto broker** add-on and the Home Assistant MQTT integration, already configured with a working MQTT login
 - Network access to GitHub for installation and updates
 
-**Bluetooth ownership:** stop BatMON, another JK-BMS Bluetooth integration, and any mobile app actively connected to the same batteries while testing. A BLE device may only support one notification subscriber at a time. If you see `org.bluez.Error.NotPermitted: Notify acquired`, check for competing BLE readers first.
+**Bluetooth ownership:** close other Bluetooth monitoring applications and any phone app actively connected to the same batteries while testing. A BLE device may only support one notification subscriber at a time. If you see `org.bluez.Error.NotPermitted: Notify acquired`, check for competing BLE readers first.
 
 ### 2. Find your JK-BMS Bluetooth address
 
@@ -59,7 +63,7 @@ There is **no need** to install the bundled Node-RED flows by hand. The add-on i
 
 ```yaml
 bluetooth_adapter: auto
-bms_addresses: "AA:BB:CC:DD:EE:FF,11:22:33:44:55:66"
+bms_addresses: "AA:BB:CC:DD:EE:FF,11:22:33:44:55:66,22:33:44:55:66:77"
 persistent_connections: true
 scan_duration_seconds: 8
 scan_interval_seconds: 45
@@ -79,7 +83,7 @@ Replace example MAC addresses and MQTT credentials with your own. Never share pa
 | Option | Description |
 |---|---|
 | `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3` controller. |
-| `bms_addresses` | Comma-separated JK-BMS Bluetooth MAC addresses. Each address identifies one BMS. |
+| `bms_addresses` | Comma-separated JK-BMS Bluetooth MAC addresses; add as many as needed. There is no fixed two-BMS software cap, but BLE hardware capacity may limit simultaneous links. |
 | `persistent_connections` | Recommended `true`: keep independent long-running BLE sessions. |
 | `scan_interval_seconds` | Interval used by the connection manager to retry finding missing batteries. |
 | `scan_duration_seconds` | How long a BLE advertisement scan runs. |
@@ -111,7 +115,7 @@ Read-only JK02 `0x96` and `0x97` queries are necessary to retrieve and verify pa
 
 ## Diagnostics and known limitations
 
-- **Connected but no readings:** verify no other Bluetooth application, BatMON instance or BLE add-on currently holds the BMS notification characteristic.
+- **Connected but no readings:** verify that no other Bluetooth application or integration currently holds the BMS notification characteristic.
 - **MQTT device missing:** verify Mosquitto credentials and the MQTT integration; check `MQTT broker connected` in the logs.
 - **Unknown parameters:** the model may not have sent a valid JK02 settings frame yet. Values are intentionally not fabricated.
 - **Temperature unavailable:** disconnected or faulty probes can report invalid readings (such as `-200 °C`). These are treated as unavailable.
@@ -124,7 +128,7 @@ When reporting an issue, please include the add-on version, Home Assistant versi
 
 ## Development, installation counting and privacy
 
-This project is in active development. We are preparing an **optional** installation heartbeat (BIP), similar to the Smart Voltronic and Smart Energy Finance projects, to understand how many installs are actively testing new versions. The send mechanism and collection endpoint are **not yet verified for this module**, so `send_bip` is intentionally disabled for the public preview. No battery SOC, MAC address, serial number, MQTT password or precise location should be included in such a heartbeat. A future release must document the exact fields, destination, cadence and opt-out control before enabling network telemetry.
+This project is in active development. We are preparing an **optional** installation heartbeat (BIP), similar to the Smart Voltronic and Smart Energy Finance projects, to understand how many installs are actively testing new versions. The send mechanism and collection endpoint are **not yet verified for this module**, so `send_bip` is intentionally disabled for the public preview. A locally generated UUID v4 is persisted in `/data/smart_jkbms_install_id` and remains stable across add-on updates. It is independent of battery addresses; adding/removing a BMS does not change the installation ID. No battery SOC, MAC address, serial number, MQTT password or precise location should be included in such a heartbeat. A future release must document the exact fields, destination, cadence and opt-out control before enabling network telemetry.
 
 ## Support this free project
 
