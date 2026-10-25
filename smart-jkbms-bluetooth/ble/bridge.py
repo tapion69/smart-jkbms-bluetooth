@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.4.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.6.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -26,6 +26,8 @@ FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
 MAC_PATTERN = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
 JK_READ_COMMANDS = (0x97, 0x96)
 JK_WRITE_HEADER = bytes.fromhex("AA 55 90 EB")
+RESET_MARKER = Path("/data/.ble_adapter_reset_last")
+RESET_COOLDOWN_SECONDS = 3600
 
 
 def build_read_command(command: int) -> bytes:
@@ -132,6 +134,118 @@ async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
         return {}
 
 
+
+async def _power_cycle_adapter_dbus(adapter: str) -> bool:
+    """Explicit opt-in only: host-wide adapter power reset via BlueZ D-Bus."""
+    from dbus_fast import BusType, Variant
+    from dbus_fast.aio import MessageBus
+
+    bus = await asyncio.wait_for(MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=8)
+    props = None
+    off_attempted = False
+    try:
+        path = f"/org/bluez/{adapter}"
+        introspect = await asyncio.wait_for(bus.introspect("org.bluez", path), timeout=8)
+        obj = bus.get_proxy_object("org.bluez", path, introspect)
+        props = obj.get_interface("org.freedesktop.DBus.Properties")
+        powered = await asyncio.wait_for(props.call_get("org.bluez.Adapter1", "Powered"), timeout=8)
+        if not powered.value:
+            raise RuntimeError("Adapter was already off; refusing to change its power state")
+        off_attempted = True
+        await asyncio.wait_for(
+            props.call_set("org.bluez.Adapter1", "Powered", Variant("b", False)),
+            timeout=8,
+        )
+        await asyncio.sleep(2)
+    finally:
+        try:
+            # Restore power even if the power-off call times out after changing
+            # the controller state. Never leave the host adapter disabled.
+            if off_attempted and props is not None:
+                await asyncio.wait_for(
+                    props.call_set("org.bluez.Adapter1", "Powered", Variant("b", True)),
+                    timeout=10,
+                )
+                await asyncio.sleep(3)
+        finally:
+            bus.disconnect()
+    return True
+
+
+async def maybe_reset_adapter_on_start(cfg: dict[str, Any]) -> bool:
+    if not bool(cfg.get("adapter_reset_on_start", False)):
+        return False
+    adapter = str(cfg.get("bluetooth_adapter", "auto")).lower()
+    if not re.fullmatch(r"hci[0-3]", adapter):
+        await forward(
+            "adapter_reset_skipped", adapter=adapter,
+            reason="Select a specific hci0/hci1/hci2/hci3; auto is unsafe",
+        )
+        return False
+    # Persist a one-hour cooldown BEFORE the power cycle. Even if the add-on
+    # crashes during a reset, it will not repeatedly disrupt Home Assistant.
+    now = time.time()
+    try:
+        if RESET_MARKER.exists():
+            last = float(RESET_MARKER.read_text(encoding="utf-8").strip())
+            if 0 <= now - last < RESET_COOLDOWN_SECONDS:
+                await forward("adapter_reset_skipped", adapter=adapter,
+                              reason="Power-cycle already attempted within one hour")
+                return False
+        RESET_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        RESET_MARKER.write_text(str(now), encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        await forward("adapter_reset_skipped", adapter=adapter,
+                      reason=f"Cannot safely persist reset cooldown: {exc}")
+        return False
+
+    await forward(
+        "adapter_reset_start", adapter=adapter,
+        warning="All Home Assistant devices on this host adapter may disconnect",
+    )
+    try:
+        restarted = await _power_cycle_adapter_dbus(adapter)
+    except Exception as exc:
+        LOG.warning("Optional adapter reset failed on %s: %s", adapter, exc)
+        await forward("adapter_reset_failed", adapter=adapter,
+                      error=f"{type(exc).__name__}: {exc}",
+                      note="Continuing normal BLE scanning")
+        return False
+    if restarted:
+        await forward("adapter_reset_complete", adapter=adapter)
+    return restarted
+
+
+async def recover_missing_devices(
+    cfg: dict[str, Any], found: dict[str, BLEDevice], *, startup: bool
+) -> dict[str, BLEDevice]:
+    """Extra scanning for missing configured BMS; never reset the adapter."""
+    wanted = addresses(str(cfg.get("bms_addresses", "")))
+    missing = [a for a in wanted if a not in found]
+    if not missing:
+        return found
+    attempts = 2 if startup else 1
+    extended = dict(cfg)
+    extended["scan_duration_seconds"] = max(
+        15, int(cfg.get("scan_duration_seconds", 8))
+    )
+    for attempt in range(1, attempts + 1):
+        await forward("recovery_scan_start", missing_addresses=missing,
+                      attempt=attempt, max_attempts=attempts,
+                      duration_seconds=extended["scan_duration_seconds"])
+        await asyncio.sleep(1)
+        more = await scan(extended)
+        found.update(more)
+        missing = [a for a in wanted if a not in found]
+        await forward(
+            "recovery_scan_result", missing_addresses=missing,
+            available_addresses=[a for a in wanted if a in found], attempt=attempt,
+        )
+        if not missing:
+            break
+    return found
+
+
 async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     listen = int(cfg.get("connection_probe_seconds", 15))
@@ -229,27 +343,53 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice) -> None:
         await forward("disconnected", address=address)
 
 
+async def poll_cycle(cfg: dict[str, Any], *, startup: bool) -> None:
+    """Probe discovered batteries FIRST, recover missing batteries SECOND.
+
+    A missing battery never delays polling a healthy battery.
+    """
+    found = await scan(cfg)
+    configured = addresses(str(cfg.get("bms_addresses", "")))
+    missing = []
+    for address in configured:
+        device = found.get(address)
+        if device is not None:
+            await probe(address, cfg, device)
+        else:
+            missing.append(address)
+    if not missing:
+        return
+    extended = await recover_missing_devices(cfg, found, startup=startup)
+    for address in missing:
+        device = extended.get(address)
+        if device is None:
+            await forward("device_not_seen", address=address,
+                          message="Not advertised after recovery scans; retry next cycle")
+        else:
+            await probe(address, cfg, device)
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.4", note="read_only_JK02_protocol_requests"
+        "bridge_start", version="0.1.6", note="JK02_read_only_with_BLE_recovery"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
         attempt += 1
         await asyncio.sleep(1)
     LOG.info("Node-RED diagnostic endpoint ready")
+    startup = True
+    try:
+        await maybe_reset_adapter_on_start(options())
+    except Exception:
+        LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
     while True:
         try:
             cfg = options()
-            detected = await scan(cfg)
-            for address in addresses(str(cfg.get("bms_addresses", ""))):
-                device = detected.get(address)
-                if device is None:
-                    await forward("device_not_seen", address=address, message="Not advertised in this scan; retry next cycle")
-                    continue
-                await probe(address, cfg, device)
+            await poll_cycle(cfg, startup=startup)
+            startup = False
             await asyncio.sleep(max(20, int(cfg.get("scan_interval_seconds", 45))))
         except asyncio.CancelledError:
             raise

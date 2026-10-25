@@ -20,6 +20,9 @@ configuration:
   read_only_requests:
     name: Requêtes de lecture JK-BMS
     description: Active uniquement les requêtes 0x97 et 0x96 pour obtenir les mesures sans modifier les réglages.
+  adapter_reset_on_start:
+    name: Réinitialiser le Bluetooth au démarrage
+    description: Désactivé par défaut. Coupe tous les appareils de cet adaptateur. Choisir explicitement hci0/hci1/hci2/hci3 (pas auto).
   debug_mode:
     name: Diagnostic détaillé
     description: Réservé aux tests initiaux.

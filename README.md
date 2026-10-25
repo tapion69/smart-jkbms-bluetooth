@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.5. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.6. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.5 development milestone
+## Included in v0.1.6 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -41,6 +41,7 @@ BatMON or the official JK app may already be connected to a BMS. Disconnect thei
 - **bms_addresses**: comma-separated BLE MAC addresses; blank means scanning only.
 - **connection_probe_seconds**: how long to listen to BLE notifications after initial requests.
 - **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
+- **adapter_reset_on_start**: optional global BlueZ adapter power cycle at add-on startup; OFF by default. Requires explicitly selecting the correct hci0-hci3 adapter instead of auto. Interrupts all Home Assistant BLE devices using that adapter. Disallowed in auto mode. The add-on continues to scan if the reset fails.
 - **Node-RED access**: account `pi`, bcrypt password hash set in `settings.js` (same hash as Smart Voltronic); no credential fields in the add-on configuration.
 
 Known limitation: Some JK-BMS implementations only transmit telemetry after they receive protocol-specific read commands. In those cases a connection can succeed without any raw notifications. This is expected when read-only requests are disabled or the BMS does not use the supported JK02 protocol.
@@ -95,3 +96,11 @@ The Node-RED **JK-BMS | Mesures** tab tries both JK02_24S and JK02_32S response 
 **Important:** 24S and 32S mean protocol layouts, not the battery's physical number of cells. Do not turn these provisional values into monitoring, automation, billing or charging-control sensors until the first raw frames are cross-checked against BatMON. No MQTT telemetry is published by this version. The summary Debug is rate-limited to one message per BMS every five seconds, but Node-RED retains all valid frames and the user can enable raw debugging when needed. The user flows remain untouched; on upgrades `merge_flows.py` adds vendor-only nodes and connections with a timestamped backup.
 
 Protocol reference: https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md
+
+## Bluetooth recovery (0.1.6)
+
+When a configured BMS is absent from the first BLE scan, the add-on first reads every BMS that **was detected** (so battery 2 is not delayed by recovery of battery 1), then runs up to **two additional scans of at least 15 seconds on startup**, and up to **one additional scan in later cycles**, without powering the adapter off. Diagnostic events `recovery_scan_start`, `recovery_scan_result` and `device_not_seen` remain visible in Node-RED. Normal BLE connections use a `BleakClient` context manager and are disconnected when the probe ends.
+
+### Optional one-time adapter power cycle
+
+To diagnose a stuck adapter, choose the correct `bluetooth_adapter` (for example `hci0`) and explicitly enable `adapter_reset_on_start`. Restart **this add-on once** to test it, then switch this option back off. The D-Bus reset briefly powers down the host adapter, disrupting every HA Bluetooth device sharing it. It requires host privileges that may not be available. The add-on never repeats a power-cycle during normal operation. If the JK-BMS is not advertising because BatMON or another app is connected, resetting the *PC adapter* cannot guarantee that the BMS will start advertising. This option does not provide Bluetooth pairing or encryption.
