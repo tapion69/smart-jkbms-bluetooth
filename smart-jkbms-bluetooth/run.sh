@@ -43,7 +43,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.2.2"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.2.3"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting Node-RED and BLE diagnostics bridge"
 

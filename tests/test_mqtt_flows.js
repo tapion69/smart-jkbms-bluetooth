@@ -25,6 +25,22 @@ function raw(mac,type=2,seq=5){
   b[190]=96;b.writeInt16LE(53,170);b[172]=1;
   b.writeUInt32LE(4600,194);
   b[200]=1;b[215]=0;b[280]=0;
+  b[281]=0x06; // DRY1 + DRY2 are active.
+  b.writeUInt16LE(90,218);     // Emergency countdown 90 seconds
+  b.writeInt16LE(1234,236);   // Heating current 1.234 A
+  b.writeUInt32LE(7200,270);  // Smart sleep countdown (seconds)
+  b.writeUInt16LE(45,278);    // Charge status elapsed
+  b.writeUInt32LE(29,266);    // Detailed log records
+  b[275]=0;                   // LiFePO4
+  b.writeUInt16LE(7,202);     // Discharge OCP recovery
+  b.writeUInt16LE(8,204);     // Discharge short recovery
+  b.writeUInt16LE(9,206);     // Charge OCP recovery
+  b.writeUInt16LE(10,208);    // Charge short recovery
+  b.writeUInt16LE(11,210);    // Undervoltage recovery
+  b.writeUInt16LE(12,212);    // Overvoltage recovery
+  b[201]=1;
+  b[245]=1;
+  b[274]=0;
   b.writeUInt16LE(33,80);
   b.writeInt16LE(-2000,258);
  }
@@ -53,6 +69,21 @@ assert.equal(msg.extras.capacity_remaining_ah,68);
 assert.equal(msg.extras.balance_current_a,0.053);
 assert.equal(msg.extras.temp3_c,null);
 assert.equal(msg.extras.cell_01_resistance_ohm,0.033);
+assert.equal(msg.extras.dry_contact_mask,6);
+assert.equal(msg.extras.dry1_contact,true);
+assert.equal(msg.extras.dry2_contact,true);
+assert.equal(msg.extras.emergency_time_countdown_s,90);
+assert.equal(msg.extras.emergency_active,true);
+assert.equal(msg.extras.heating_current_a,1.234);
+assert.equal(msg.extras.smart_sleep_countdown_s,7200);
+assert.equal(msg.extras.charge_status_time_s,45);
+assert.equal(msg.extras.detail_log_count,29);
+assert.equal(msg.extras.battery_type,"LiFePO4");
+assert.equal(msg.extras.discharge_ocp_release_s,7);
+assert.equal(msg.extras.overvoltage_release_s,12);
+assert.equal(msg.extras.balancing_active,true);
+assert.equal(msg.extras.charger_connected,true);
+assert.equal(msg.extras.total_runtime_formatted,"0j 01h 16m");
 assert.equal(call({...data,source_crc_ok:false}),null);
 const setting=call(raw(macB,1,7));
 assert.equal(JSON.parse(setting.payload).kind,"frame");

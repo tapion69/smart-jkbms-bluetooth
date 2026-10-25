@@ -81,6 +81,37 @@ MEASURES = [
  ("uart1_protocol","Protocole UART1",None,None,None,"diagnostic"),
  ("uart2_protocol","Protocole UART2",None,None,None,"diagnostic"),
  ("can_protocol","Protocole CAN",None,None,None,"diagnostic"),
+ ("uart3_protocol","Protocole UART3 (ID)",None,None,None,"diagnostic"),
+ ("device_model","Modèle BMS",None,None,None,"diagnostic"),
+ ("device_name","Nom du BMS",None,None,None,"diagnostic"),
+ ("manufacturing_date","Date de fabrication",None,None,None,"diagnostic"),
+ ("serial_number","Numéro de série",None,None,None,"diagnostic"),
+ ("power_on_count","Nombre de démarrages",None,None,"total_increasing","diagnostic"),
+ ("uart2_enabled","UART2 activé",None,None,None,"diagnostic"),
+ ("lcd_buzzer_trigger_id","Déclencheur buzzer (ID)",None,None,None,"diagnostic"),
+ ("dry1_trigger_id","Déclencheur DRY1 (ID)",None,None,None,"diagnostic"),
+ ("dry2_trigger_id","Déclencheur DRY2 (ID)",None,None,None,"diagnostic"),
+ ("uart_protocol_library_version","Bibliothèque UART (ID)",None,None,None,"diagnostic"),
+ ("can_protocol_library_version","Bibliothèque CAN (ID)",None,None,None,"diagnostic"),
+ ("data_stored_period","Période enregistrement (brut)",None,None,None,"diagnostic"),
+ ("rcv_time_h","Durée tension RCV","h","duration","measurement","diagnostic"),
+ ("rfv_time_h","Durée tension RFV","h","duration","measurement","diagnostic"),
+ ("battery_type","Type batterie",None,None,None,"diagnostic"),
+ ("battery_type_id","Type batterie (ID)",None,None,None,"diagnostic"),
+ ("heating_current_a","Heating_Current","A","current","measurement","diagnostic"),
+ ("smart_sleep_countdown_s","Smart_sleep_countdown","s","duration","measurement","diagnostic"),
+ ("emergency_time_countdown_s","Emergency_countdown","s","duration","measurement","diagnostic"),
+ ("charge_status_time_s","Charge_status_time","s","duration","measurement","diagnostic"),
+ ("charge_status_id","charge_status",None,None,None,"diagnostic"),
+ ("detail_log_count","Detail_log_count",None,None,None,"diagnostic"),
+ ("total_runtime_formatted","Total_runtime_formatted",None,None,None,"diagnostic"),
+ ("discharge_ocp_release_s","Discharge_OCP_recovery","s","duration","measurement","diagnostic"),
+ ("discharge_short_release_s","Discharge_short_recovery","s","duration","measurement","diagnostic"),
+ ("charge_ocp_release_s","Charge_OCP_recovery","s","duration","measurement","diagnostic"),
+ ("charge_short_release_s","Charge_short_recovery","s","duration","measurement","diagnostic"),
+ ("undervoltage_release_s","Undervoltage_recovery","s","duration","measurement","diagnostic"),
+ ("overvoltage_release_s","Overvoltage_recovery","s","duration","measurement","diagnostic"),
+ ("dry_contact_mask","Contacts secs (masque)",None,None,None,"diagnostic"),
 ]
 BINARY_MEASURES=[
  ("charging_mos","MOS charge"),
@@ -88,6 +119,12 @@ BINARY_MEASURES=[
  ("precharge","Précharge"),
  ("heating","Chauffage"),
  ("alarm_active","Alarme BMS"),
+ ("dry1_contact","DRY1 contact"),
+ ("dry2_contact","DRY2 contact"),
+ ("emergency_active","Emergency"),
+ ("balancing_active","Switch_Balance (état réel)"),
+ ("charger_connected","Chargeur branché"),
+ ("pcl_module_active","Module PCL actif"),
 ]
 SETTING_KEYS={"controls_hex","cell_uvp_v","cell_ovp_v","balance_start_v",
               "max_charge_current_a","max_discharge_current_a"}
@@ -132,20 +169,46 @@ def parse_settings(raw: bytes) -> dict[str, Any]:
 
 
 def parse_info(raw: bytes) -> dict[str, Any]:
+    # Type 0x03, 300 bytes, CRC checked upstream by valid_frame().
+    # Never extract or publish passcode [62:78], user data [102:118],
+    # setup passcode [118:134], nor any arbitrary string beyond allowlist.
     def ascii_field(pos: int, length: int) -> str | None:
         value=raw[pos:pos+length].split(b"\x00",1)[0]
         if not value or any(x<32 or x>126 for x in value):
             return None
         return value.decode("ascii").strip()[:32] or None
+
     result={
       "vendor_id":ascii_field(6,16),
+      "device_model":ascii_field(6,16),
       "hardware_version":ascii_field(22,8),
       "software_version":ascii_field(30,8),
       "device_uptime_h":round(int.from_bytes(raw[38:42],"little")/3600,2),
+      "power_on_count":int.from_bytes(raw[42:46],"little"),
+      "device_name":ascii_field(46,16),
       "uart1_protocol":raw[184],
-      "uart2_protocol":raw[218],
       "can_protocol":raw[185],
+      "uart2_protocol":raw[218],
+      "uart2_enabled":bool(raw[219]),
+      "lcd_buzzer_trigger_id":raw[234],
+      "dry1_trigger_id":raw[235],
+      "dry2_trigger_id":raw[236],
+      "uart_protocol_library_version":raw[237],
+      "can_protocol_library_version":raw[268],
+      "data_stored_period":int.from_bytes(raw[262:266],"little"),
+      "rcv_time_h":round(raw[266]/10,1),
+      "rfv_time_h":round(raw[267]/10,1),
+      # UART3 is reported at byte 270 by the JK02 decoder in syssi;
+      # expose the numeric ID, never send protocol writes automatically.
+      "uart3_protocol":raw[270] if raw[270] != 255 else None,
     }
+    date=ascii_field(78,8)
+    if date and len(date)==6 and date.isascii() and date.isdigit():
+        yy,mm,dd=int(date[:2]),int(date[2:4]),int(date[4:6])
+        if 1<=mm<=12 and 1<=dd<=31:
+            result["manufacturing_date"]=f"20{yy:02d}-{mm:02d}-{dd:02d}"
+    # Read-only hardware serial; never include the adjacent access passcodes.
+    result["serial_number"]=ascii_field(86,11)
     return result
 
 
@@ -203,6 +266,34 @@ def enrich(d: dict[str,Any], extras: dict[str,Any]) -> dict[str,Any] | None:
         for k in ("precharge","heating","temp3_c","temp4_c","temp5_c"):
             val=extras.get(k)
             if val is not None:out[k]=val
+        # All additional telemetry is sourced from the same sequence-matched
+        # type-0x02 CRC-checked frame; never copy arbitrary caller fields.
+        for k in ("dry1_contact","dry2_contact","emergency_active",
+                  "balancing_active","charger_connected","pcl_module_active"):
+            if type(extras.get(k)) is bool:
+                out[k]=extras[k]
+        for k,low,high in (
+            ("heating_current_a",-300,300),
+            ("emergency_time_countdown_s",0,65535),
+            ("smart_sleep_countdown_s",0,4294967295),
+            ("charge_status_time_s",0,65535),
+            ("detail_log_count",0,4294967295),
+            ("battery_type_id",0,2),
+            ("charge_status_id",0,2),
+            ("discharge_ocp_release_s",0,65535),
+            ("discharge_short_release_s",0,65535),
+            ("charge_ocp_release_s",0,65535),
+            ("charge_short_release_s",0,65535),
+            ("undervoltage_release_s",0,65535),
+            ("overvoltage_release_s",0,65535),
+            ("dry_contact_mask",0,255),
+        ):
+            val=numeric(extras.get(k),low,high)
+            if val is not None:out[k]=val
+        for k in ("battery_type","total_runtime_formatted"):
+            val=extras.get(k)
+            if isinstance(val,str) and 0<len(val)<=40:
+                out[k]=val
         for idx in range(1,len(readings)+1):
             resistance=extras.get(f"cell_{idx:02d}_resistance_ohm")
             if resistance is not None:out[f"cell_{idx:02d}_resistance_ohm"]=resistance
@@ -403,6 +494,12 @@ class HomeAssistantMQTT:
           "temp5_c":"Sonde_5_temp",
           "alarm_active":"BMS Alarm Active","alarm_text":"BMS Alarm List",
           "balance_action":"Balance_Action",
+          "dry1_contact":"DRY1 contact",
+          "dry2_contact":"DRY2 contact",
+          "heating_current_a":"Heating_Current",
+          "power_on_count":"Power_On_Count",
+          "charge_status_time_s":"charge_status_time",
+          "total_runtime_formatted":"Total_runtime_formatted",
         }
         skip_params=set(BY_KEY)
         for key,label,unit,dc,sc,category in MEASURES:
@@ -436,6 +533,13 @@ class HomeAssistantMQTT:
                              "suggested_display_precision":3})
             else:opts["entity_category"]="diagnostic"
             self._component(mac,key,"sensor",label,opts)
+        # An independent connectivity entity must remain readable while
+        # BLE telemetry is offline, so use availability as its state topic.
+        self._component(mac,"online_status","binary_sensor","Online",{
+            "state_topic":root+"/availability",
+            "payload_on":"online","payload_off":"offline",
+            "device_class":"connectivity","entity_category":"diagnostic",
+        })
         for key,label in BINARY_MEASURES:
             self._component(mac,key,"binary_sensor",names.get(key,label),{
                 "state_topic":root+"/state",

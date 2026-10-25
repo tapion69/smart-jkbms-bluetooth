@@ -1,6 +1,6 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.2.2. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.2.3. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
@@ -243,3 +243,31 @@ La commande Home Assistant **`Autoriser modification paramètres`** apparaît da
 **Précautions** : l'écriture de réglages électriques ou thermiques peut faire interrompre la charge, désactiver une protection ou endommager une batterie. Évite les automatisations sur ces commandes. Le bridge exige une télémétrie fraîche et **une trame de paramètres 0x01 vérifiée il y a moins de 180 secondes** avant toute écriture; si tes BMS n'envoient pas cette trame, les réglages restent inconnus et les commandes sont refusées. Les valeurs sont validées par liste blanche, type, limites et échelle; une commande envoyée n'est jamais affichée comme confirmée. Le BMS doit renvoyer une nouvelle trame 0x01 pour confirmer la valeur. Les paramètres inutilisables ou hors plage restent inconnus. Les données ne doivent pas servir de remplacement aux protections matérielles.
 
 La mise à jour supprime automatiquement les anciennes annonces MQTT retenues du bouton 30 s et des entités capteur remplacées par des entités Number; aucun nouvel appareil dupliqué. Le flow Node-RED personnalisé est préservé, avec la sauvegarde de migration existante.
+
+## Version 0.2.3 — Advanced JK02_32S readings (no additional writes)
+
+**Two independent MQTT devices remain unchanged**, as do their stable MAC-derived unique IDs and the existing 3-decimal cell voltages, 1-decimal pack voltage, 3-decimal cell voltage delta in V, and validated battery telemetry. The existing **Configuration** parameters and **Autoriser modification paramètres** switch are unchanged. This release adds *read-only* information only. It does not introduce any new CAN/UART register writes or changes to battery protections.
+
+**Type 0x02 measurements**, parsed from the same 300-byte CRC-checked JK02_32S frame already associated by sequence with each validated decoded record:
+
+| New Home Assistant entity | Frame bytes | Meaning |
+| --- | --- | --- |
+| `DRY1 contact`, `DRY2 contact`, `Contacts secs (masque)` | 281 (bits 1,2) | Physical dry-contact states |
+| `Heating_Current` | 236–237 | Heater current, A (signed /1000) |
+| `Emergency_countdown`, `Emergency` | 218–219 | Emergency seconds and derived active flag |
+| `Smart_sleep_countdown` | 270–273 | Smart-sleep time remaining in seconds |
+| `charge_status_time`, `charge_status` | 278–280 | Seconds in charge phase and raw phase ID |
+| `Detail_log_count` | 266–269 | Logged diagnostic events |
+| `Type batterie`, `Type batterie (ID)` | 275 | LiFePO4/Li-ion/LTO identification |
+| `Total_runtime_formatted` | 194–197 | Derived uptime text (days/hours/minutes) |
+| `Switch_Balance (état réel)` | 201 | Actual balancing indicator |
+| `Chargeur branché`, `Module PCL actif` | 245, 274 | JK02 status flags when values are explicitly 0/1 |
+| Six overcurrent / short-circuit / under- and overvoltage recovery timers | 202–213 | Remaining release timers in seconds |
+
+**Type 0x03 device information**, only when a valid settings/info frame is received: device model and name, hardware/software versions, manufacturing date (validated YYMMDD), read-only serial number, power-on count, device runtime, CAN and UART1/UART2 protocol identifiers, UART2 enabled flag, UART3 protocol ID, DRY1/DRY2 and LCD buzzer trigger IDs, protocol library IDs, recorded-data period, RCV/RFV times. **The bridge never publishes the JK device passcode, setup passcode or arbitrary user data** from this information frame.
+
+**Online** is a separate MQTT connectivity binary sensor driven by per-BMS telemetry availability, so it can display online/offline rather than disappearing as unavailable when the BMS disconnects. Remaining optional fields use normal Home Assistant unknown/unavailable behavior when a firmware does not supply them. When BMS1 reports -200 °C for its absent probes, these temperature entities remain unavailable; the electrical decoder is unchanged. Do not use these experimental fields to replace BMS temperature/electrical protection logic.
+
+Advanced UART1/UART2/UART3/CAN and DRY contact **selectors are intentionally read-only as raw IDs for now**. This avoids guessing the meaning of vendor-specific options and writing potentially hazardous configuration. Add editable select entities only after verifying register command semantics and readback on the actual firmware. Source reference: syssi/esphome-jk-bms `docs/protocol-design-ble.md` and `components/jk_bms_ble/jk_bms_ble.cpp`.
+
+**Validation**: simulated 300-byte JK02 packets test offset decoding, type-0x02 and type-0x03 separation, alarms/contacts, credentials never published, individual MAC identity, discovery entity types, and output validity. Real BMS firmware comparison remains necessary. No changes were made to user-customized Node-RED functions, Bluetooth session handling, or MQTT credentials.

@@ -152,6 +152,102 @@ class MQTTTests(unittest.TestCase):
         self.assertNotIn("SETUP_PASS",all_payload)
         self.assertIn("19.0a",all_payload)
 
+    def test_v023_additional_jk02_telemetry_and_binary_contacts(self):
+        m,c=self.instance()
+        d=sample_data()
+        d["extras"].update({
+          "dry_contact_mask":0x06,
+          "dry1_contact":True,
+          "dry2_contact":True,
+          "heating_current_a":1.234,
+          "emergency_time_countdown_s":90,
+          "emergency_active":True,
+          "smart_sleep_countdown_s":7200,
+          "charge_status_time_s":45,
+          "detail_log_count":29,
+          "battery_type":"LiFePO4",
+          "battery_type_id":0,
+          "total_runtime_formatted":"0j 01h 16m",
+          "discharge_ocp_release_s":7,
+          "charge_ocp_release_s":9,
+          "overvoltage_release_s":12,
+          "balancing_active":True,
+          "charger_connected":True,
+          "pcl_module_active":False,
+        })
+        self.assertTrue(m.ingest(d))
+        state=json.loads([p for t,p,_,_ in c.published
+                          if t==m.base(A)+"/state"][-1])
+        for key,value in (
+            ("dry1_contact",True),("dry2_contact",True),
+            ("heating_current_a",1.234),("emergency_time_countdown_s",90),
+            ("smart_sleep_countdown_s",7200),("charge_status_time_s",45),
+            ("battery_type","LiFePO4"),("detail_log_count",29),
+            ("discharge_ocp_release_s",7),("overvoltage_release_s",12),
+            ("total_runtime_formatted","0j 01h 16m"),
+            ("charger_connected",True),("pcl_module_active",False),
+        ):
+            self.assertEqual(state.get(key),value,key)
+        conf={topic:json.loads(value) for topic,value,_,_
+              in c.published if topic.endswith("/config") and value}
+        base=m.discovery+"/"+ "binary_sensor/"+short_id(A)+"_"
+        self.assertEqual(conf[base+"dry1_contact/config"]["name"],"DRY1 contact")
+        self.assertEqual(conf[base+"dry2_contact/config"]["name"],"DRY2 contact")
+        self.assertEqual(conf[base+"online_status/config"]["state_topic"],
+                         m.base(A)+"/availability")
+        self.assertNotIn("availability_topic",conf[base+"online_status/config"])
+        self.assertEqual(conf[m.discovery+"/sensor/"+short_id(A)+
+                               "_heating_current_a/config"]["unit_of_measurement"],"A")
+
+    def test_v023_device_information_readonly_and_no_passcode_leak(self):
+        m,c=self.instance()
+        f=bytearray(300);f[:5]=bytes.fromhex("55 AA EB 90 03")
+        f[6:17]=b"JK_PB2A16S1"
+        f[22:26]=b"14XA";f[30:35]=b"19.0b"
+        f[38:42]=(3600).to_bytes(4,"little")
+        f[42:46]=(93).to_bytes(4,"little")
+        f[46:55]=b"Batterie1"
+        f[62:72]=b"TOPSECRET!"
+        f[78:84]=b"231118"
+        f[86:97]=b"30925721340"
+        f[102:113]=b"PRIVATEUSER"
+        f[118:128]=b"ADMIN_PASS"
+        f[184]=2;f[185]=4;f[218]=7;f[219]=1
+        f[234]=3;f[235]=4;f[236]=5;f[237]=6
+        f[262:266]=(30).to_bytes(4,"little")
+        f[266]=12;f[267]=8;f[268]=2;f[270]=3
+        f[299]=sum(f[:299])&255
+        parsed=parse_info(bytes(f))
+        self.assertEqual(parsed["device_model"],"JK_PB2A16S1")
+        self.assertEqual(parsed["power_on_count"],93)
+        self.assertEqual(parsed["manufacturing_date"],"2023-11-18")
+        self.assertEqual(parsed["uart3_protocol"],3)
+        self.assertEqual(parsed["dry1_trigger_id"],4)
+        self.assertEqual(parsed["dry2_trigger_id"],5)
+        self.assertEqual(parsed["rcv_time_h"],1.2)
+        self.assertEqual(parsed["rfv_time_h"],0.8)
+        self.assertEqual(parsed["serial_number"],"30925721340")
+        self.assertTrue(m.ingest({"kind":"frame","frame_type":3,
+                                  "address":A,"raw_hex":f.hex()}))
+        self.assertTrue(m.ingest(sample_data(A)))
+        state=json.loads([p for t,p,_,_ in c.published
+                          if t==m.base(A)+"/state"][-1])
+        self.assertEqual(state["device_name"],"Batterie1")
+        self.assertEqual(state["power_on_count"],93)
+        self.assertEqual(state["uart2_enabled"],True)
+        self.assertEqual(state["lcd_buzzer_trigger_id"],3)
+        all_public=" ".join(str(x[1]) for x in c.published)
+        for secret in ("TOPSECRET!","PRIVATEUSER","ADMIN_PASS"):
+            self.assertNotIn(secret,all_public)
+        discovery=[json.loads(value) for topic,value,_,_ in c.published
+                   if topic.endswith("/config") and value]
+        self.assertFalse(any(
+            "command_topic" in row and
+            any(k in row.get("unique_id","") for k in
+                ("uart3_protocol","dry1_trigger_id","dry2_trigger_id"))
+            for row in discovery
+        ))
+
     def test_real_paho_v2_reason_code_connect_publishes_discovery(self):
         # Regression for v0.2.0: int(ReasonCode) raised TypeError and the
         # on_connect callback died before publishing any HA devices.
