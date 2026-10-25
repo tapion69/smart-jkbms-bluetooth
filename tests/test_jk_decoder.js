@@ -84,6 +84,8 @@ const invalidElectrical=run(badCells);
 assert(!invalidElectrical || !invalidElectrical[0],"Unsafe electrical data stays rejected");
 
 const empty=Buffer.alloc(300);empty.set([0x55,0xAA,0xEB,0x90,2,9]);empty[299]=empty.subarray(0,299).reduce((s,v)=>(s+v)&255,0);
+// Reset the per-BMS rejection throttle after preceding negative test cases.
+stored.delete("reject:C8:47:80:1A:27:12");
 const rejected=run(empty);assert.equal(rejected[0],null);assert.equal(rejected[1].payload.reason,"no_plausible_profile");
 const invalid=sample("JK02_32S");invalid[299]^=0xff;
 assert.equal(run(invalid),null);
