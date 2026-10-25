@@ -199,9 +199,9 @@ class MQTTTests(unittest.TestCase):
         c.published.clear()
         m.discover(A,16)
         sw=[json.loads(p) for t,p,_,_ in c.published
-          if t.endswith("disable_temperature_sensors/config")]
-        self.assertGreaterEqual(len(sw),1)
-        self.assertTrue(all(entry["optimistic"] is False for entry in sw))
+          if "/switch/" in t and t.endswith("disable_temperature_sensors/config")]
+        self.assertEqual(len(sw),1)
+        self.assertIs(sw[0]["optimistic"],False)
         self.assertEqual(sw[0]["payload_on"],"ON")
         self.assertEqual(sw[0]["payload_off"],"OFF")
         self.assertIn("command_topic",sw[0])
