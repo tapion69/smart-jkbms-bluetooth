@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.4. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.5. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.4 development milestone
+## Included in v0.1.5 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -12,11 +12,11 @@ Standalone Bluetooth add-on following the clean repository structure of Smart Vo
 - Read-only Bluetooth connection probes use BLEDevice objects retained from discovery; absent configured BMS addresses are skipped until the next scan.
 - Detect separate FFE1 write and notify handles; send only documented JK02 read requests `0x97` and `0x96` (optional), then stream raw BLE notifications to Node-RED.
 - Python-to-Node-RED local HTTP bridge protected by a random per-installation token.
-- A visual Node-RED tab: **Bluetooth | Diagnostics**.
+- Node-RED tabs: **Bluetooth | Diagnostics**, **JK-BMS | Trames**, and **JK-BMS | Mesures** (diagnostic-only JK02 parser).
 - Persistent Node-RED flows loaded from `/data/node-red/flows.json` (not `/addon/flows.json`); user modifications are retained on restart.
 - Home Assistant options translated into French and English.
 
-**Not yet implemented:** validated cell measurements/SOC/temperature/current, MQTT Discovery, dashboards or BMS parameter changes. The only commands sent by this build are JK02 **read requests** `0x97` and `0x96`; no BMS configuration writes.
+**Not yet validated:** decoded cell measurements/SOC/temperature/current against a physical battery; MQTT Discovery and dashboards are not implemented. The only commands sent by this build are JK02 **read requests** `0x97` and `0x96`; no BMS configuration writes.
 
 ## Installation
 
@@ -39,10 +39,11 @@ BatMON or the official JK app may already be connected to a BMS. Disconnect thei
 - **scan_duration_seconds**: duration of discovery.
 - **scan_all_devices**: show all advertisements instead of only JK/BMS names.
 - **bms_addresses**: comma-separated BLE MAC addresses; blank means scanning only.
-- **connection_probe_seconds**: how long to listen to BLE notifications after initial requests.\n- **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
+- **connection_probe_seconds**: how long to listen to BLE notifications after initial requests.
+- **read_only_requests**: enabled by default; sends JK02 read requests 0x97 and 0x96 to the writable FFE1 characteristic, not to the notification characteristic. Disable for passive scanning.
 - **Node-RED access**: account `pi`, bcrypt password hash set in `settings.js` (same hash as Smart Voltronic); no credential fields in the add-on configuration.
 
-Known limitation: Some JK-BMS implementations only transmit telemetry after they receive protocol-specific read commands. In those cases a connection can succeed without any raw notifications. This is expected in v0.1.3.
+Known limitation: Some JK-BMS implementations only transmit telemetry after they receive protocol-specific read commands. In those cases a connection can succeed without any raw notifications. This is expected when read-only requests are disabled or the BMS does not use the supported JK02 protocol.
 
 ## Security
 
@@ -59,7 +60,7 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
 - **scan_error mentioning BlueZ or D-Bus:** verify the Bluetooth adapter is detected by Home Assistant. Some hosts may require additional Supervisor/AppArmor configuration; check the error before changing privileges.
 - **device_not_seen:** a configured BMS was absent in the last scan, so connection is skipped until the next scan. Consider increasing scan duration and stopping other BLE applications.
 - **connection_error:** a BMS can disappear after discovery, or another app may be connected. Review BLE diagnostics.
-- **connected but no SOC/cell data:** expected: measurement decoding is not implemented in v0.1.3. `41 54 0D 0A` is ASCII `AT` plus CR/LF, not a valid JK02 telemetry frame.
+- **connected but no SOC/cell data:** expected: measurement decoding is provisional in v0.1.5. `41 54 0D 0A` is ASCII `AT` plus CR/LF, not a valid JK02 telemetry frame.
 
 ## Project layout
 
@@ -72,6 +73,8 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
         run.sh
         settings.js
         flows.json
+        decoder_flows.json
+        merge_flows.py
         ble/bridge.py
         translations/en.yaml
         translations/fr.yaml
@@ -80,7 +83,15 @@ Known limitation: Some JK-BMS implementations only transmit telemetry after they
 ## Development plan
 
 - 0.1.4: send JK02 0x97 and 0x96 read-only requests and report separate FFE1 characteristic properties, while retaining v0.1.3 scan improvements.
-- Later: validated JK-BMS read commands, framed responses, verified measurements.
-- Later: MQTT Discovery and battery diagnostics; optional dashboard integration.
+- 0.1.5: provisional JK02_24S/JK02_32S telemetry decoder in Node-RED, profile plausibility checks, 5-second debug summaries, non-destructive flow migration.
+- Next: validate the telemetry against BatMON on actual batteries, confirm the exact JK02 profile, then implement MQTT Discovery and dashboards.
 
 **License:** copyright © 2026 tapion69. No redistribution or commercial-use license has been granted for this prototype. The licensing terms will be defined before a public release. We do not copy the source of BatMON, syssi, or the existing JK-BMS RS485 add-on.
+
+## Experimental JK02 decoder — v0.1.5
+
+The Node-RED **JK-BMS | Mesures** tab tries both JK02_24S and JK02_32S response layouts. It checks cell bitmask, individual cell voltage, pack voltage versus cell sum, SOC and temperature. Only a *single plausible* profile produces a diagnostic snapshot; ambiguous or invalid frames are shown in **Profil inconnu : raw_hex à envoyer** (no fabricated measurements).
+
+**Important:** 24S and 32S mean protocol layouts, not the battery's physical number of cells. Do not turn these provisional values into monitoring, automation, billing or charging-control sensors until the first raw frames are cross-checked against BatMON. No MQTT telemetry is published by this version. The summary Debug is rate-limited to one message per BMS every five seconds, but Node-RED retains all valid frames and the user can enable raw debugging when needed. The user flows remain untouched; on upgrades `merge_flows.py` adds vendor-only nodes and connections with a timestamped backup.
+
+Protocol reference: https://github.com/syssi/esphome-jk-bms/blob/main/docs/protocol-design-ble.md

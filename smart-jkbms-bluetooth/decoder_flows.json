@@ -1,0 +1,123 @@
+[
+  {
+    "id": "b150100000000001",
+    "type": "tab",
+    "label": "JK-BMS | Mesures",
+    "disabled": false,
+    "info": "0.1.5: experimental JK02_24S/32S decoder, diagnostic only; compare with BatMON before MQTT."
+  },
+  {
+    "id": "b150100000000008",
+    "type": "comment",
+    "z": "b150100000000001",
+    "name": "0.1.5 – Mesures expérimentales, aucun MQTT",
+    "info": "Format vérifié via masque, tension totale, somme des cellules, SOC et températures. Ne publier qu'après comparaison réelle avec BatMON.",
+    "x": 410,
+    "y": 50,
+    "wires": []
+  },
+  {
+    "id": "b150100000000002",
+    "type": "link out",
+    "z": "8b55b11b32e064ac",
+    "name": "Vers mesures JK",
+    "mode": "link",
+    "links": [
+      "b150100000000003"
+    ],
+    "x": 740,
+    "y": 270,
+    "wires": []
+  },
+  {
+    "id": "b150100000000003",
+    "type": "link in",
+    "z": "b150100000000001",
+    "name": "Trames type 2 validées",
+    "links": [
+      "b150100000000002"
+    ],
+    "x": 140,
+    "y": 155,
+    "wires": [
+      [
+        "b150100000000004"
+      ]
+    ]
+  },
+  {
+    "id": "b150100000000004",
+    "type": "function",
+    "z": "b150100000000001",
+    "name": "Décoder + valider JK02_24S / 32S",
+    "func": "// PROTOTYPE: diagnostic only. JK02_24S / JK02_32S are frame layouts, not cell counts.\nconst raw=msg.payload||{};\nif(raw.type!==2 || raw.crc_ok!==true || typeof raw.raw_hex!==\"string\" || raw.raw_hex.length!==600) return null;\nconst b=Buffer.from(raw.raw_hex,\"hex\");\nif(b.length!==300 || b.subarray(0,4).toString(\"hex\")!==\"55aaeb90\" || b[4]!==2) return null;\nif(b.subarray(0,299).reduce((s,v)=>(s+v)&255,0)!==b[299]) return null;\nconst profiles=[\n  {name:\"JK02_24S\",n:24,mask:54,voltage:118,current:126,soc:141,t1:130,t2:132,mos:134,cap:146,cycles:150,charge:166,discharge:167,error:136,errorSize:2},\n  {name:\"JK02_32S\",n:32,mask:70,voltage:150,current:158,soc:173,t1:162,t2:164,mos:144,cap:178,cycles:182,charge:198,discharge:199,error:166,errorSize:4}\n];\nfunction parse(p){\n const mask=b.readUInt32LE(p.mask),cells=[];\n for(let i=0;i<p.n;i++) if((mask>>>i)&1) cells.push({number:i+1,voltage_v:b.readUInt16LE(6+2*i)/1000});\n const voltage=b.readUInt32LE(p.voltage)/1000,current=b.readInt32LE(p.current)/1000,soc=b[p.soc];\n const sum=cells.reduce((x,c)=>x+c.voltage_v,0), temperatures=[p.t1,p.t2,p.mos].map(x=>b.readInt16LE(x)/10);\n if(cells.length<4 || cells.some(c=>c.voltage_v<1.5||c.voltage_v>4.5) ||\n    voltage<5 || voltage>170 || Math.abs(sum-voltage)>Math.max(1.5,voltage*0.04) ||\n    soc>100 || Math.abs(current)>3000 || temperatures.some(t=>t< -80||t>160)) return null;\n const values=cells.map(c=>c.voltage_v);\n return {address:raw.address,sequence:raw.sequence,format:p.name,validation:\"provisional_compare_with_BatMON\",\n   source_crc_ok:true,cell_count:cells.length,cells,\n   voltage_v:+voltage.toFixed(3),current_a:+current.toFixed(3),power_w:+(voltage*current).toFixed(1),\n   soc_pct:soc,cell_min_v:Math.min(...values),cell_max_v:Math.max(...values),\n   cell_delta_mv:Math.round((Math.max(...values)-Math.min(...values))*1000),cell_sum_v:+sum.toFixed(3),\n   temp1_c:temperatures[0],temp2_c:temperatures[1],mos_temp_c:temperatures[2],\n   nominal_capacity_ah:b.readUInt32LE(p.cap)/1000,cycles:b.readUInt32LE(p.cycles),\n   charging_mos:b[p.charge]===1,discharging_mos:b[p.discharge]===1,\n   error_mask:p.errorSize===4?b.readUInt32LE(p.error):b.readUInt16LE(p.error)};\n}\nconst found=profiles.map(parse).filter(Boolean);\nif(found.length!==1){\n const key=\"reject:\"+raw.address,now=Date.now(),last=context.get(key)||0;\n if(now-last<15000) return null;\n context.set(key,now);\n node.status({fill:\"yellow\",shape:\"ring\",text:found.length?\"Ambiguous layout\":\"Unknown JK layout\"});\n return [null,{topic:\"jk/\"+raw.address+\"/decoder_validation\",payload:{\n  address:raw.address,sequence:raw.sequence,\n  reason:found.length?\"ambiguous_protocol\":\"no_plausible_profile\",\n  matching_formats:found.map(x=>x.format),raw_hex:raw.raw_hex}}];\n}\nconst out=found[0];\ncontext.set(\"latest:\"+raw.address,out);\nnode.status({fill:\"green\",shape:\"dot\",text:out.format+\" \"+out.voltage_v+\"V \"+out.soc_pct+\"%\"});\nreturn [{topic:\"jk/\"+raw.address+\"/decoded_diagnostic\",payload:out},null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 155,
+    "wires": [
+      [
+        "b150100000000005"
+      ],
+      [
+        "b150100000000007"
+      ]
+    ]
+  },
+  {
+    "id": "b150100000000005",
+    "type": "function",
+    "z": "b150100000000001",
+    "name": "Résumé 5s / batterie",
+    "func": "const a=msg.payload && msg.payload.address;\nif(!a) return null;\nconst now=Date.now(),key=\"last:\"+a;\nif(now-(context.get(key)||0)<5000) return null;\ncontext.set(key,now);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 680,
+    "y": 125,
+    "wires": [
+      [
+        "b150100000000006"
+      ]
+    ]
+  },
+  {
+    "id": "b150100000000006",
+    "type": "debug",
+    "z": "b150100000000001",
+    "name": "Mesures batterie (à confirmer)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 920,
+    "y": 125,
+    "wires": []
+  },
+  {
+    "id": "b150100000000007",
+    "type": "debug",
+    "z": "b150100000000001",
+    "name": "Profil inconnu : raw_hex à envoyer",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 735,
+    "y": 225,
+    "wires": []
+  }
+]

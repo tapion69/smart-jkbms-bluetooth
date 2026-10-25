@@ -2,8 +2,8 @@
 """Idempotent, non-destructive merge of new vendor Node-RED flow nodes.
 
 Never overwrite or delete existing user nodes. Before any change, save a
-timestamped backup. The only existing edge added is from the built-in
-diagnostics node to the new link-out, leaving existing wires intact.
+timestamped backup. Only approved vendor link edges are added; existing nodes
+and user wiring stay intact.
 """
 from __future__ import annotations
 
@@ -15,8 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def merge(installed: Path, packaged: Path) -> int:
-    base = json.loads(packaged.read_text(encoding="utf-8"))
+def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
+    base = []
+    for source in (packaged, *extra_packages):
+        nodes = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(nodes, list):
+            raise ValueError(f"Vendor flow package {source} must be a JSON array")
+        base.extend(nodes)
     if not isinstance(base, list):
         raise ValueError("Vendor flows must be a JSON array")
     if not installed.exists():
@@ -32,19 +37,28 @@ def merge(installed: Path, packaged: Path) -> int:
     additions = [n for n in base if n["id"] not in by_id]
     changed = bool(additions)
 
-    # Keep the original diagnostics function unmodified, add one outgoing wire.
-    source = by_id.get("136f1472850339d1")
-    target = "77930ff9204bec01"
-    if isinstance(source, dict) and source.get("type") == "function":
+    # Append vendor links only; never replace custom source nodes or wires.
+    links = (
+        ("136f1472850339d1", "77930ff9204bec01"),
+        ("65ad8ac512b5e001", "b150100000000002"),
+    )
+    packaged_ids = {n.get("id") for n in base if isinstance(n, dict)}
+    for source_id, target_id in links:
+        source = by_id.get(source_id)
+        if source is None and source_id in packaged_ids:
+            # First migration from a very old install: the source node will be
+            # supplied by the packaged flow and should already have its wiring.
+            continue
+        if not isinstance(source, dict) or target_id not in packaged_ids:
+            print(f"[WARN] Cannot automatically link {source_id} to {target_id}")
+            continue
         wires = source.get("wires")
         if isinstance(wires, list) and wires and isinstance(wires[0], list):
-            if target not in wires[0]:
-                wires[0].append(target)
+            if target_id not in wires[0]:
+                wires[0].append(target_id)
                 changed = True
         else:
-            print("[WARN] Diagnostics wires are customized; cannot link frame analyzer")
-    else:
-        print("[WARN] Diagnostics function missing/customized; inspect new link manually")
+            print(f"[WARN] User wiring was customized for {source_id}; link manually")
 
     if not changed:
         return 0
@@ -63,7 +77,7 @@ def merge(installed: Path, packaged: Path) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: merge_flows.py INSTALLED_JSON PACKAGED_JSON", file=sys.stderr)
+    if len(sys.argv) < 3:
+        print("Usage: merge_flows.py INSTALLED_JSON PACKAGED_JSON [MORE_PACKAGES...]", file=sys.stderr)
         sys.exit(2)
-    merge(Path(sys.argv[1]), Path(sys.argv[2]))
+    merge(Path(sys.argv[1]), Path(sys.argv[2]), *(Path(p) for p in sys.argv[3:]))

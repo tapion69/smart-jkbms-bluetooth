@@ -7,6 +7,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED = ROOT / "smart-jkbms-bluetooth" / "flows.json"
+DECODER = ROOT / "smart-jkbms-bluetooth" / "decoder_flows.json"
 SCRIPT = ROOT / "smart-jkbms-bluetooth" / "merge_flows.py"
 spec = importlib.util.spec_from_file_location("merge_flows", SCRIPT)
 mod = importlib.util.module_from_spec(spec)
@@ -35,6 +36,25 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))), 1)
             self.assertEqual(mod.merge(dest, PACKAGED), 0)
             self.assertEqual(len(list(Path(td).glob("*.bak"))), 1)
+
+    def test_add_decoder_to_existing_installation_without_overwriting_user_nodes(self):
+        previous_nodes = json.loads(PACKAGED.read_text())
+        decoder_nodes = json.loads(DECODER.read_text())
+        custom = {"id":"my_node_custom", "type":"comment", "z":"8b55b11b32e064ac", "name":"Do not overwrite"}
+        previous_nodes.append(custom)
+        assembler = next(n for n in previous_nodes if n["id"]=="65ad8ac512b5e001")
+        assembler["wires"] = [["5524471869b2e0af"],["8d30a20107f452b3"]]
+        with tempfile.TemporaryDirectory() as td:
+            dst=Path(td)/"flows.json"
+            dst.write_text(json.dumps(previous_nodes))
+            mod.merge(dst,PACKAGED,DECODER)
+            actual=json.loads(dst.read_text())
+            self.assertEqual(len(actual),len(previous_nodes)+len(decoder_nodes))
+            self.assertEqual(next(n for n in actual if n["id"]=="my_node_custom"),custom)
+            changed=next(n for n in actual if n["id"]=="65ad8ac512b5e001")
+            self.assertEqual(changed["wires"][0], ["5524471869b2e0af","b150100000000002"])
+            self.assertEqual(mod.merge(dst,PACKAGED,DECODER),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
 if __name__ == "__main__":

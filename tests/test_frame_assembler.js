@@ -22,9 +22,9 @@ function frame(type = 2) {
   return b;
 }
 const first = frame(2);
-assert.deepEqual(input(a, first.subarray(0, 1)), [null, null]);
-assert.deepEqual(input(a, first.subarray(1, 45)), [null, null]);
-assert.deepEqual(input(b, Buffer.from("AT\r\n")), [null, null]); // separate device buffer
+assert.equal(input(a, first.subarray(0, 1)), null);
+assert.equal(input(a, first.subarray(1, 45)), null);
+assert.equal(input(b, Buffer.from("AT\r\n")), null); // separate device buffer
 const result = input(a, first.subarray(45));
 assert.equal(result[0].length, 1);
 assert.equal(result[0][0].payload.crc_ok, true);
