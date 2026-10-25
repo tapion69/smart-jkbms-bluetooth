@@ -73,7 +73,7 @@ def settings_frame():
 class MQTTTests(unittest.TestCase):
     def instance(self):
         c=FakeClient()
-        cfg={"mqtt_enabled":True,"allow_temperature_control":False}
+        cfg={"mqtt_enabled":True,"allow_parameter_changes":False}
         m=HomeAssistantMQTT(cfg,[A,B],client=c)
         m.connected=True
         return m,c
@@ -385,10 +385,10 @@ class MQTTTests(unittest.TestCase):
             send(setting,b"2.8")
             await asyncio.sleep(0.02)
             m.control.dispatch.assert_not_awaited()
-            # Add-on opt-in must be enabled as well as the explicit per-BMS HA switch.
+            # Master opt-in must be enabled as well as the explicit per-BMS HA switch.
             send(gate,b"ON")
             self.assertFalse(m.permission[A])
-            m.cfg["allow_temperature_control"]=True
+            m.cfg["allow_parameter_changes"]=True
             send(gate,b"ON",retain=True)
             self.assertFalse(m.permission[A])
             send(gate,b"ON")
@@ -423,7 +423,7 @@ class MQTTTests(unittest.TestCase):
         import mqtt_ha
         async def run():
             m,c=self.instance()
-            m.cfg["allow_temperature_control"]=True
+            m.cfg["allow_parameter_changes"]=True
             m.loop=asyncio.get_running_loop()
             m.ingest(sample_data(A))
             m.permission[A]=True
@@ -460,7 +460,7 @@ class MQTTTests(unittest.TestCase):
         import mqtt_ha
         async def run():
             m,c=self.instance()
-            m.cfg["allow_temperature_control"]=True
+            m.cfg["allow_parameter_changes"]=True
             m.loop=asyncio.get_running_loop()
             m.ingest(sample_data(A))
             m.permission[A]=True
@@ -484,7 +484,7 @@ class MQTTTests(unittest.TestCase):
         import mqtt_ha
         async def run():
             m,c=self.instance()
-            m.cfg["allow_temperature_control"]=True
+            m.cfg["allow_parameter_changes"]=True
             m.loop=asyncio.get_running_loop()
             m.ingest(sample_data(A))
             self.assertTrue(m.ingest({"kind":"frame","address":A,"frame_type":1,
