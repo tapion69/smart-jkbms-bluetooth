@@ -6,6 +6,7 @@ No BMS passwords or credentials are ever published.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -213,7 +214,9 @@ def enrich(d: dict[str,Any], extras: dict[str,Any]) -> dict[str,Any] | None:
             if resistance is not None:out[f"cell_{idx:02d}_resistance_ohm"]=resistance
     mask=d.get("error_mask")
     if type(mask) is int and 0<=mask<=0xFFFFFFFF:
-        alarms=[label for bit,label in ALARM_NAMES.items() if mask&(1<<bit)]
+        # Bit 4 means "fully charged" in JK02 and is informational.
+        alarms=[label for bit,label in ALARM_NAMES.items()
+                if bit!=4 and mask&(1<<bit)]
         out["error_count"]=len(alarms)
         out["alarm_active"]=bool(alarms)
         out["alarm_text"]=", ".join(alarms) if alarms else "Aucune"
@@ -229,8 +232,10 @@ class HomeAssistantMQTT:
         self.control=control
         self.prefix=str(cfg.get("mqtt_topic_prefix") or "smart_jkbms_ble").strip().strip("/")
         self.discovery=str(cfg.get("mqtt_discovery_prefix") or "homeassistant").strip().strip("/")
+        # Distinct installations sharing one MQTT broker must not collide.
+        instance_suffix=hashlib.sha256(",".join(addresses).encode("ascii")).hexdigest()[:12]
         self.client=client or mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                 client_id="smart-jkbms-"+str(cfg.get("mqtt_client_suffix","bridge")))
+                 client_id="smart-jkbms-"+instance_suffix)
         self.client.on_connect=self.on_connect
         self.client.on_disconnect=self.on_disconnect
         self.client.on_message=self.on_message
