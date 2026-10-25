@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"smart-jkbms-bluetooth"/"ble"))
 from mqtt_ha import HomeAssistantMQTT, enrich, valid_frame, parse_settings, parse_info, short_id
+from paho.mqtt.reasoncodes import ReasonCode
+from paho.mqtt.packettypes import PacketTypes
 
 A="C8:47:80:1A:1A:EF"
 B="C8:47:80:1A:27:12"
@@ -148,6 +150,40 @@ class MQTTTests(unittest.TestCase):
         self.assertNotIn("SECRETPIN",all_payload)
         self.assertNotIn("SETUP_PASS",all_payload)
         self.assertIn("19.0a",all_payload)
+
+    def test_real_paho_v2_reason_code_connect_publishes_discovery(self):
+        # Regression for v0.2.0: int(ReasonCode) raised TypeError and the
+        # on_connect callback died before publishing any HA devices.
+        accepted=ReasonCode(PacketTypes.CONNACK,"Success")
+        with self.assertRaises(TypeError):
+            int(accepted)
+        m,c=self.instance()
+        m.connected=False
+        m.on_connect(c,None,None,accepted,None)
+        self.assertTrue(m.connected)
+        cfg=[(topic,json.loads(payload)) for topic,payload,_,_ in c.published
+             if topic.endswith("/config")]
+        self.assertGreater(len(cfg),100)
+        self.assertEqual(
+            {body["device"]["identifiers"][0] for _,body in cfg},
+            {short_id(A),short_id(B)}
+        )
+        self.assertIn("homeassistant/status",c.subscribed)
+        self.assertTrue(all(retained for topic,_,_,retained in c.published
+                            if topic.endswith("/config")))
+        refused=ReasonCode(PacketTypes.CONNACK,"Bad User Name or Password")
+        c.published.clear()
+        m.on_connect(c,None,None,refused,None)
+        self.assertFalse(m.connected)
+        self.assertFalse(c.published,"No discovery on rejected credentials")
+
+    def test_broker_connection_failure_is_visible_not_a_crash(self):
+        m,c=self.instance()
+        self.assertTrue(callable(c.on_connect_fail))
+        with self.assertLogs("smart_jkbms_ble.mqtt",level="WARNING") as logs:
+            c.on_connect_fail(c,None)
+        self.assertTrue(any("MQTT transport connection failed" in line
+                            for line in logs.output))
 
     def test_reconnect_availability_and_retained_discovery(self):
         m,c=self.instance()

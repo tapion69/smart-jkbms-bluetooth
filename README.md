@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.2.0. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.2.1. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.2.0 development milestone
+## Included in v0.2.1 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -216,3 +216,16 @@ The switch **remains visible** but unavailable until `allow_temperature_control`
 Diagnostics remain accessible in Node-RED on port 1895. All user's customized Node-RED flows are preserved by `merge_flows.py` with backups and tested idempotent migrations. MQTT publishing is optional via `mqtt_enabled: false`.
 
 **Development limits**: status readings and JK02 frame interpretation remain experimental pending BatMON comparison. No measurements are to be trusted for overtemperature / short-circuit / charge safety interlocks. MQTT state availability is derived from valid decoded BLE telemetry, *not* just a connected BLE socket. Cell resistance and other supplementary frame offsets follow the documented JK02_32S layout and are not supported on arbitrary JK04 profiles. The BMS's physical protection settings must not be modified to make dashboard data look good.
+
+## MQTT Discovery connection hotfix — v0.2.1
+
+**Fixed an issue that prevented any Home Assistant device registration.** Paho MQTT 2.x invokes `on_connect` with a `ReasonCode` object, and the previous implementation incorrectly called `int(reason_code)`. Since Paho 2.1.0 `ReasonCode` has no `__int__`, this raised a `TypeError` on every successful MQTT CONNACK, stopping discovery entirely. v0.2.1 uses the documented `reason_code == 0` comparison; the unit tests include an actual Paho 2.1.0 `ReasonCode(PacketTypes.CONNACK)` regression case.
+
+On the next MQTT broker connection, logs now show:
+- `MQTT configuration: host=... port=... discovery=homeassistant enabled=True BMS=2 auth=configured (password hidden)`;
+- `MQTT broker connected. Publishing HA Discovery for 2 configured BMS: ...`;
+- `MQTT Discovery published for 2 BMS (homeassistant/#)`.
+
+When the broker rejects credentials, the log reports `MQTT broker refused connection`. When TCP/DNS connection fails, the log reports `MQTT transport connection failed`. If the configured `bms_addresses` field is empty, the log explains that no devices can be registered. Passwords are never included.
+
+**Upgrade** the add-on, check Mosquitto username/password in its options, and restart. `mqtt_enabled` must be true, `mqtt_discovery_prefix` must match Home Assistant's configured MQTT discovery prefix, and `bms_addresses` must contain both MACs. Discovery is registered on broker connection even before measurements have been decoded; missing measurements remain unavailable. No change to Bluetooth session handling, temperature protections or existing custom Node-RED flows.

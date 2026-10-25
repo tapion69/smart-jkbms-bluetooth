@@ -238,6 +238,7 @@ class HomeAssistantMQTT:
                  client_id="smart-jkbms-"+instance_suffix)
         self.client.on_connect=self.on_connect
         self.client.on_disconnect=self.on_disconnect
+        self.client.on_connect_fail=self.on_connect_fail
         self.client.on_message=self.on_message
         self.enabled=bool(cfg.get("mqtt_enabled",True))
         self.connected=False
@@ -268,18 +269,34 @@ class HomeAssistantMQTT:
         self.send(f"{self.base(mac)}/{key}",payload,retain=retain)
 
     def on_connect(self,client,userdata,flags,reason_code,properties=None):
+        # Paho MQTT 2.x returns a ReasonCode object, not an int; int(...) raises
+        # TypeError and prevents HA discovery completely.
         with self._lock:
-            self.connected=int(reason_code)==0
+            self.connected = reason_code == 0
             if not self.connected:
-                LOG.warning("MQTT rejected connection: %s",reason_code)
+                LOG.warning("MQTT broker refused connection: %s (check credentials/ACL)",
+                            reason_code)
                 return
-            LOG.info("MQTT connected; registering %d configured JK-BMS devices",len(self.addresses))
+            LOG.info("MQTT broker connected. Publishing HA Discovery for %d configured BMS: %s",
+                     len(self.addresses), ", ".join(self.addresses) or "(none configured)")
             self.client.subscribe("homeassistant/status",qos=1)
             for mac in self.addresses:
                 base=self.base(mac)
                 self.client.subscribe(f"{base}/temperature_control/set",qos=1)
                 self.client.subscribe(f"{base}/temperature_control/arm",qos=1)
             self.rediscover()
+            LOG.info("MQTT Discovery published for %d BMS (%s/#)",
+                     len(self.addresses),self.discovery)
+
+    def on_connect_fail(self,client,userdata):
+        # Called by loop_start() when a network connection cannot be established.
+        now=time.monotonic()
+        if now-self.last_mqtt_error>=30 or self.last_mqtt_error==0:
+            self.last_mqtt_error=now
+            LOG.warning("MQTT transport connection failed to %s:%s "
+                        "(check Mosquitto is running, add-on network and DNS)",
+                        self.cfg.get("mqtt_host","core-mosquitto"),
+                        self.cfg.get("mqtt_port",1883))
 
     def on_disconnect(self,client,userdata,disconnect_flags,reason_code,properties=None):
         with self._lock:
@@ -451,6 +468,14 @@ class HomeAssistantMQTT:
             self.client.username_pw_set(user,str(self.cfg.get("mqtt_password","") or ""))
         host=str(self.cfg.get("mqtt_host","core-mosquitto")).strip()
         port=int(self.cfg.get("mqtt_port",1883))
+        LOG.info("MQTT configuration: host=%s port=%d discovery=%s enabled=%s "
+                 "BMS=%d auth=%s (password hidden)",
+                 host,port,self.discovery,self.enabled,len(self.addresses),
+                 "configured" if user else "missing")
+        if not self.addresses:
+            LOG.warning("MQTT Discovery: bms_addresses is empty; no devices can be registered")
+        if not user:
+            LOG.warning("MQTT username empty; protected Mosquitto brokers will reject authentication")
         self.client.reconnect_delay_set(2,60)
         # paho's network loop retries if the MQTT broker is temporarily down.
         try:
