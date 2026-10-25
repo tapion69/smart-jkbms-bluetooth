@@ -93,6 +93,8 @@ class ControlService:
         if action not in {"refresh", "set_temperature_disabled", "write_parameter"}:
             return 400, {"error": "action_not_allowed"}
         if action in ("write_parameter", "set_temperature_disabled"):
+            if not bool(cfg.get("allow_parameter_changes", False)):
+                return 403, {"error": "parameter_changes_not_enabled_in_addon"}
             if (self.mqtt_sink is None or
                     not self.mqtt_sink.permission.get(mac, False)):
                 return 403, {"error": "allow_parameter_changes_disabled_for_bms"}
