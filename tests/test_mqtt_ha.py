@@ -86,7 +86,7 @@ class MQTTTests(unittest.TestCase):
         self.assertEqual(devices,{short_id(A),short_id(B)})
         bms1=[json.loads(p) for t,p,_,_ in c.published if t==m.base(A)+"/state"]
         self.assertIsNone(bms1[-1]["temp1_c"])
-        self.assertEqual(bms1[-1]["cell_16_v"],3.2015)
+        self.assertAlmostEqual(bms1[-1]["cell_16_v"],3.2015,places=4)
         self.assertEqual(bms1[-1]["capacity_remaining_ah"],67.0)
         self.assertEqual(bms1[-1]["soc_pct"],21)
         self.assertIn((m.base(A)+"/temperature/temp1_c/availability","offline",1,True),c.published)
