@@ -126,7 +126,8 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(by_id[custom["id"]],custom)
             for origin in ("136f1472850339d1","65ad8ac512b5e001","b150100000000004"):
                 self.assertIn("b190021900000001",by_id[origin]["wires"][0])
-            self.assertTrue(by_id["b190021900000003"]["active"])
+            # Replaced by the concise v0.1.11 diagnostics; old noisy Debug is off.
+            self.assertFalse(by_id["b190021900000003"]["active"])
             self.assertFalse(by_id["5524471869b2e0af"]["active"])
             self.assertEqual(mod.merge(target, PACKAGED, DECODER, summary, health),0)
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
