@@ -617,6 +617,7 @@ class HomeAssistantMQTT:
                 self.permission[mac]=False
                 self.emit(mac,"write_permission/state","OFF")
                 self.online_cache[mac]=False
-                self.armed_until.pop(mac,None)
+                self.permission[mac]=False
+                self.emit(mac,"write_permission/state","OFF")
                 return True
         return False
