@@ -127,8 +127,12 @@ class ControlService:
                                 payload.get("register"),payload.get("value")) )
         if action in ("set_temperature_disabled","write_parameter"):
             self.last_write[mac] = loop.time()
-            LOG.warning("MANUAL JK02 TEMPERATURE PROTECTION WRITE REQUEST for %s: disabled=%s",
-                        mac, payload["disable"])
+            if action == "set_temperature_disabled":
+                LOG.warning("MANUAL JK02 TEMPERATURE PROTECTION WRITE REQUEST for %s: disabled=%s",
+                            mac,payload["disable"])
+            else:
+                LOG.warning("MANUAL JK02 PARAMETER WRITE REQUEST for %s: register=0x%02X",
+                            mac,payload["register"])
         try:
             result = await asyncio.wait_for(future, 12)
             return 202, {"address": mac, "write_sent": action in ("set_temperature_disabled","write_parameter"),
