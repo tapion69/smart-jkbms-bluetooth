@@ -37,6 +37,16 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(mod.merge(dest, PACKAGED), 0)
             self.assertEqual(len(list(Path(td).glob("*.bak"))), 1)
 
+    def test_fresh_install_includes_decoder_flows(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest=Path(td)/"flows.json"
+            expected=len(json.loads(PACKAGED.read_text()))+len(json.loads(DECODER.read_text()))
+            self.assertEqual(mod.merge(dest, PACKAGED, DECODER), expected)
+            actual=json.loads(dest.read_text())
+            self.assertEqual(len(actual),expected)
+            self.assertIn("b150100000000004", {n["id"] for n in actual})
+            self.assertEqual(mod.merge(dest, PACKAGED, DECODER),0)
+
     def test_add_decoder_to_existing_installation_without_overwriting_user_nodes(self):
         previous_nodes = json.loads(PACKAGED.read_text())
         decoder_nodes = json.loads(DECODER.read_text())

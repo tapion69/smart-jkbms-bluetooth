@@ -26,8 +26,12 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         raise ValueError("Vendor flows must be a JSON array")
     if not installed.exists():
         installed.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(packaged, installed)
-        print("[INFO] Initial Node-RED flows installed")
+        # A fresh installation must include ALL packaged flow files,
+        # not only the original base flows.json.
+        installed.write_text(
+            json.dumps(base, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"[INFO] Initial Node-RED flows installed: {len(base)} nodes")
         return len(base)
 
     current = json.loads(installed.read_text(encoding="utf-8"))
