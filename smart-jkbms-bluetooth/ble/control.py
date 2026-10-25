@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
+from parameters import BY_REGISTER, build_write
 
 LOG = logging.getLogger("smart_jkbms_ble.control")
 CONFIRM = "I_UNDERSTAND_THERMAL_PROTECTION_RISK"
@@ -35,6 +36,8 @@ class Command:
     action: str
     disable: bool | None
     future: asyncio.Future
+    register: int | None = None
+    value: Any = None
 
 
 class ControlService:
@@ -87,8 +90,20 @@ class ControlService:
         if not isinstance(mac, str) or mac not in configured:
             return 403, {"error": "bms_not_configured"}
         action = payload.get("action")
-        if action not in {"refresh", "set_temperature_disabled"}:
+        if action not in {"refresh", "set_temperature_disabled", "write_parameter"}:
             return 400, {"error": "action_not_allowed"}
+        if action == "write_parameter":
+            if not bool(cfg.get("allow_temperature_control", False)):
+                return 403, {"error": "manual_control_disabled_in_addon_options"}
+            if payload.get("confirmation") != CONFIRM:
+                return 403, {"error": "explicit_confirmation_required"}
+            register=payload.get("register")
+            if type(register) is not int or register not in BY_REGISTER:
+                return 403, {"error": "unsupported_register"}
+            try:
+                build_write(register,payload.get("value"))
+            except (ValueError,OverflowError) as exc:
+                return 400, {"error": "invalid_parameter_value", "details": str(exc)}
         if action == "set_temperature_disabled":
             if not bool(cfg.get("allow_temperature_control", False)):
                 return 403, {"error": "manual_control_disabled_in_addon_options"}
@@ -99,6 +114,8 @@ class ControlService:
             last = self.last_write.get(mac, 0.0)
             if asyncio.get_running_loop().time()-last < 15:
                 return 429, {"error": "write_rate_limit_15s"}
+        if action == "write_parameter" and asyncio.get_running_loop().time()-self.last_write.get(mac,0.0)<15:
+            return 429, {"error": "write_rate_limit_15s"}
         queue = self.sessions.get(mac)
         if queue is None:
             return 409, {"error": "bms_not_connected_or_no_persistent_session"}
@@ -106,14 +123,15 @@ class ControlService:
             return 429, {"error": "bms_command_already_pending"}
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        await queue.put(Command(action, payload.get("disable"), future))
-        if action == "set_temperature_disabled":
+        await queue.put(Command(action, payload.get("disable"), future,
+                                payload.get("register"),payload.get("value")) )
+        if action in ("set_temperature_disabled","write_parameter"):
             self.last_write[mac] = loop.time()
             LOG.warning("MANUAL JK02 TEMPERATURE PROTECTION WRITE REQUEST for %s: disabled=%s",
                         mac, payload["disable"])
         try:
             result = await asyncio.wait_for(future, 12)
-            return 202, {"address": mac, "write_sent": action == "set_temperature_disabled",
+            return 202, {"address": mac, "write_sent": action in ("set_temperature_disabled","write_parameter"),
                          "verified_by_bms": False, "action": action, **result}
         except asyncio.TimeoutError:
             return 504, {"error": "command_timeout_unverified"}

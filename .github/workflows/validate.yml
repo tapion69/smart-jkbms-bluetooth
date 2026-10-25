@@ -45,6 +45,8 @@ jobs:
         run: node tests/test_temperature_switch.js
       - name: MQTT Home Assistant discovery tests
         run: python -m unittest discover -s tests -p 'test_mqtt_ha.py' -v
+      - name: Config parameter safety and register tests
+        run: python -m unittest discover -s tests -p 'test_parameters.py' -v
       - name: Node-RED to MQTT publisher tests
         run: node tests/test_mqtt_flows.js
       - name: Manual control Node-RED flow tests

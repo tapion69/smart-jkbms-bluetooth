@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.2.1. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.2.2. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.2.1 development milestone
+## Included in v0.2.2 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -229,3 +229,17 @@ On the next MQTT broker connection, logs now show:
 When the broker rejects credentials, the log reports `MQTT broker refused connection`. When TCP/DNS connection fails, the log reports `MQTT transport connection failed`. If the configured `bms_addresses` field is empty, the log explains that no devices can be registered. Passwords are never included.
 
 **Upgrade** the add-on, check Mosquitto username/password in its options, and restart. `mqtt_enabled` must be true, `mqtt_discovery_prefix` must match Home Assistant's configured MQTT discovery prefix, and `bms_addresses` must contain both MACs. Discovery is registered on broker connection even before measurements have been decoded; missing measurements remain unavailable. No change to Bluetooth session handling, temperature protections or existing custom Node-RED flows.
+
+## Version 0.2.2 – Décimales et paramètres MQTT
+
+Les deux appareils JK-BMS sont conservés avec leurs identifiants MAC. Home Assistant affiche les noms proches des captures : `Cell_1_volt` à `Cell_16_volt` (précision suggérée **3 décimales**), `Tension_Totale_volt` (**1 décimale**), `Cell_1_ohm`… `Cell_16_ohm` (**3 décimales**), `cell_voltage_delta` en **V avec 3 décimales** (exemple `0,005 V`, à la place de `5 mV`). Les numéros de cellules mini/maxi sont calculés d'après les valeurs réellement reçues. La préférence d'affichage est appliquée avec `suggested_display_precision` dans la découverte MQTT officielle et peut être personnalisée dans Home Assistant.
+
+Les entités sont classées comme dans les captures : mesures de fonctionnement, `Configuration` pour les paramètres, `Diagnostic` pour les résistances/alarmes/infos. Des entités `number` et `switch` sont découvertes pour **tous les paramètres JK02_32S dont les offsets de lecture et registres d'écriture ont pu être vérifiés** (tensions cellule, équilibrage, SOC 0/100, RCV/RFV, limites de courant, protections, délais, chauffage, nombre de cellules, capacité, MOS charge/décharge, sleep et autres commandes documentées). Des registres non documentés, le calibrage, les fonctions réservées et d'autres modèles JK02/JK04 **ne sont pas exposés en écriture**. Le code original se trouve dans `ble/parameters.py`; les correspondances ont été comparées à `syssi/esphome-jk-bms` et `docs/protocol-design-ble.md`.
+
+### Autorisation de modification
+
+La commande Home Assistant **`Autoriser modification paramètres`** apparaît dans chaque appareil JK-BMS. Ce **verrou logiciel local** n'est pas un réglage BMS. Par sécurité, il est **OFF après chaque démarrage, reconnexion MQTT ou perte de liaison BLE**; son état MQTT n'est pas conservé comme commande. Une fois activé, il reste ON jusqu'à ce que tu l'éteignes ou que l'une de ces conditions survienne, **sans temporisation de 30 secondes**. L'ancien bouton `Armer commande thermique (30 s)` est supprimé des découvertes retenues. En plus du verrou, l'option principale `allow_temperature_control: true` doit être explicitement activée dans la configuration de l'add-on pour autoriser toute écriture : ce nom est conservé pour compatibilité avec la version précédente. La désactivation de cette option bloque toutes les modifications.
+
+**Précautions** : l'écriture de réglages électriques ou thermiques peut faire interrompre la charge, désactiver une protection ou endommager une batterie. Évite les automatisations sur ces commandes. Le bridge exige une télémétrie fraîche et **une trame de paramètres 0x01 vérifiée il y a moins de 180 secondes** avant toute écriture; si tes BMS n'envoient pas cette trame, les réglages restent inconnus et les commandes sont refusées. Les valeurs sont validées par liste blanche, type, limites et échelle; une commande envoyée n'est jamais affichée comme confirmée. Le BMS doit renvoyer une nouvelle trame 0x01 pour confirmer la valeur. Les paramètres inutilisables ou hors plage restent inconnus. Les données ne doivent pas servir de remplacement aux protections matérielles.
+
+La mise à jour supprime automatiquement les anciennes annonces MQTT retenues du bouton 30 s et des entités capteur remplacées par des entités Number; aucun nouvel appareil dupliqué. Le flow Node-RED personnalisé est préservé, avec la sauvegarde de migration existante.

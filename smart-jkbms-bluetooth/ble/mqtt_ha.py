@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 import paho.mqtt.client as mqtt
+from parameters import PARAMS, BY_KEY, read_settings, build_write
 
 LOG = logging.getLogger("smart_jkbms_ble.mqtt")
 VALID_MAC = re.compile(r"^(?:[A-F0-9]{2}:){5}[A-F0-9]{2}$")
@@ -122,22 +123,12 @@ def temperature(raw: bytes, pos: int) -> float | None:
 
 
 def parse_settings(raw: bytes) -> dict[str, Any]:
-    # JK02_32S settings only. Explicitly reject implausible layout.
-    def milli(pos: int, maximum: float=1000.0) -> float | None:
-        val=int.from_bytes(raw[pos:pos+4],"little")/1000
-        return round(val,3) if 0<val<=maximum else None
-    cell_uvp=milli(10,5)
-    cell_ovp=milli(18,5)
-    if cell_uvp is None or cell_ovp is None or cell_uvp>=cell_ovp:
+    # Fail closed for layout mismatch; returns no assumed settings if no frame.
+    cfg=read_settings(raw)
+    uvp=cfg.get("cell_uvp_v");ovp=cfg.get("cell_ovp_v")
+    if uvp is None or ovp is None or uvp>=ovp:
         return {}
-    return {
-      "cell_uvp_v":cell_uvp,"cell_ovp_v":cell_ovp,
-      "balance_start_v":milli(138,5),
-      "max_charge_current_a":milli(50,1500),
-      "max_discharge_current_a":milli(62,1500),
-      "controls_hex":f"0x{int.from_bytes(raw[282:284],'little'):04X}",
-      "temperature_monitoring_disabled":bool(raw[282]&0x02),
-    }
+    return cfg
 
 
 def parse_info(raw: bytes) -> dict[str, Any]:
@@ -181,13 +172,16 @@ def enrich(d: dict[str,Any], extras: dict[str,Any]) -> dict[str,Any] | None:
     if abs(sum(readings)-v)>max(1.5,v*0.04):
         return None
     out={
-     "voltage_v":v,"current_a":current,"power_w":round(v*current,1),
+     "voltage_v":v,"tension_totale_volt":round(v,1),"current_a":current,"power_w":round(v*current,1),
      "charge_power_w":round(max(0,v*current),1),
      "discharge_power_w":round(max(0,-v*current),1),
      "soc_pct":int(soc),"cell_count":len(readings),
      "cell_min_v":min(readings),"cell_max_v":max(readings),
+     "cell_min_number":readings.index(min(readings))+1,
+     "cell_max_number":readings.index(max(readings))+1,
      "cell_avg_v":round(sum(readings)/len(readings),3),
      "cell_delta_mv":round((max(readings)-min(readings))*1000),
+     "cell_delta_v":round(max(readings)-min(readings),3),
      "format":fmt,"temperature_quality":str(d.get("temperature_quality") or "unknown"),
     }
     for k in ("nominal_capacity_ah","cycles","error_mask","charging_mos",
@@ -251,7 +245,8 @@ class HomeAssistantMQTT:
         self.last_type3:dict[str,bytes]={}
         self.last_confirmed:dict[str,float]={}
         self.discovered_cells:dict[str,int]={}
-        self.armed_until:dict[str,float]={}
+        self.permission:dict[str,bool]={mac:False for mac in addresses}
+        self.command_pending:dict[str,float]={}
         self.loop:asyncio.AbstractEventLoop|None=None
         self.last_mqtt_error=0.0
         self.online_cache:dict[str,bool]={}
@@ -283,7 +278,10 @@ class HomeAssistantMQTT:
             for mac in self.addresses:
                 base=self.base(mac)
                 self.client.subscribe(f"{base}/temperature_control/set",qos=1)
-                self.client.subscribe(f"{base}/temperature_control/arm",qos=1)
+                self.client.subscribe(f"{base}/write_permission/set",qos=1)
+                self.client.subscribe(f"{base}/parameters/+/set",qos=1)
+            # The permission is intentionally non-persistent across reconnect.
+            for mac in self.addresses:self.permission[mac]=False
             self.rediscover()
             LOG.info("MQTT Discovery published for %d BMS (%s/#)",
                      len(self.addresses),self.discovery)
@@ -308,47 +306,69 @@ class HomeAssistantMQTT:
             if msg.topic=="homeassistant/status" and msg.payload==b"online":
                 self.rediscover()
                 return
+            # Retained command topics must NEVER re-apply protection settings
+            # or re-enable write permission after a broker reconnect.
+            if getattr(msg,"retain",False):
+                return
             for mac in self.addresses:
                 base=self.base(mac)
-                if msg.topic==f"{base}/temperature_control/arm":
-                    if msg.payload==b"PRESS" and bool(self.cfg.get("allow_temperature_control",False)):
-                        self.armed_until[mac]=time.monotonic()+30
-                        self.emit(mac,"command_status","Commande thermique armée pour 30 s")
+                if msg.topic==f"{base}/write_permission/set":
+                    allow=(msg.payload==b"ON") and bool(self.cfg.get("allow_temperature_control",False))
+                    self.permission[mac]=allow
+                    self.emit(mac,"write_permission/state","ON" if allow else "OFF")
+                    self.emit(mac,"command_status",
+                        "Modification des paramètres autorisée" if allow else
+                        "Modification des paramètres verrouillée")
                     return
                 if msg.topic==f"{base}/temperature_control/set":
-                    self._temperature_set_command(mac,msg.payload)
+                    self._parameter_command(mac,"disable_temperature_sensors",msg.payload)
+                    return
+                marker=f"{base}/parameters/"
+                if msg.topic.startswith(marker) and msg.topic.endswith("/set"):
+                    key=msg.topic[len(marker):-4]
+                    self._parameter_command(mac,key,msg.payload)
                     return
 
-    def _temperature_set_command(self,mac:str,payload:bytes)->None:
-        if payload not in (b"ON",b"OFF"):
+    def _parameter_command(self,mac:str,key:str,payload:bytes)->None:
+        p=BY_KEY.get(key)
+        if p is None:return
+        if not self.cfg.get("allow_temperature_control",False) or not self.permission.get(mac,False):
+            self.emit(mac,"command_status","Refus: activer Autoriser modification paramètres")
             return
-        if not bool(self.cfg.get("allow_temperature_control",False)):
-            self.emit(mac,"command_status","Refus : commandes thermiques désactivées")
+        if mac not in self.settings or (time.monotonic()-self.last_confirmed.get(mac,0))>180:
+            self.emit(mac,"command_status","Refus: paramètres BMS non confirmés (trame 0x01 absente)")
             return
-        expiration=self.armed_until.pop(mac,0)
-        if expiration<time.monotonic():
-            self.emit(mac,"command_status","Refus : armer d'abord la commande (30 s)")
+        if self.last_data.get(mac,0)<=0 or time.monotonic()-self.last_data[mac]>70:
+            self.emit(mac,"command_status","Refus: aucune télémétrie BMS récente")
             return
         if self.loop is None or self.control is None:
-            self.emit(mac,"command_status","Refus : service BLE indisponible")
+            self.emit(mac,"command_status","Refus: liaison BLE non disponible")
             return
-        import concurrent.futures
+        try:
+            if p.kind=="switch":
+                if payload not in (b"ON",b"OFF"):return
+                value=payload==b"ON"
+            else:
+                value=float(payload.decode("ascii"))
+            # Validate range and on-wire encoding BEFORE queuing commands.
+            build_write(p.reg,value)
+        except (ValueError,UnicodeDecodeError,OverflowError):
+            self.emit(mac,"command_status","Refus: valeur hors limites pour "+key)
+            return
+        # Never make this write appear as an acknowledged setting.
         from control import CONFIRM
-        action={"address":mac,"action":"set_temperature_disabled",
-                "disable":payload==b"ON","confirmation":CONFIRM}
+        action={"address":mac,"action":"write_parameter",
+                "register":p.reg,"value":value,"confirmation":CONFIRM}
         async def dispatch():
-            status,response=await self.control.dispatch(action)
+            status,result=await self.control.dispatch(action)
             with self._lock:
-                if status==202:
-                    self.emit(mac,"command_status",
-                         "Commande envoyée, en attente de confirmation BMS")
-                else:
-                    self.emit(mac,"command_status",
-                         "Commande refusée : "+str(response.get("error","erreur")))
+                self.emit(mac,"command_status",
+                    ("Commande "+key+" envoyée, attente lecture de retour"
+                     if status==202 else "Refus "+key+": "+str(result.get("error","erreur"))))
         future=asyncio.run_coroutine_threadsafe(dispatch(),self.loop)
         def done(f):
             try:f.result()
-            except Exception as err:LOG.error("MQTT command handling failed: %s",err)
+            except Exception as exc:LOG.error("JK parameter command failed: %s",exc)
         future.add_done_callback(done)
 
     def _device(self,mac:str)->dict[str,Any]:
@@ -367,7 +387,26 @@ class HomeAssistantMQTT:
 
     def discover(self,mac:str,cells:int=16)->None:
         root=self.base(mac)
+        names={
+          "voltage_v":"Tension_Totale_volt","current_a":"Courant_total",
+          "power_w":"Puissance_Totale","soc_pct":"SOC_pourcentage",
+          "soh_pct":"SOH_pourcentage","capacity_remaining_ah":"Capacite_restante_Ah",
+          "nominal_capacity_ah":"Capacite_batterie_Ah","cycles":"Nombre_Cycle",
+          "total_cycle_capacity_ah":"Cycle_Capacite_Ah",
+          "cell_count":"cell_count_used","cell_min_v":"cell_voltage_min_value",
+          "cell_max_v":"cell_voltage_max_value","cell_avg_v":"cell_voltage_average",
+          "cell_delta_v":"cell_voltage_delta","cell_min_number":"cell_voltage_min_number",
+          "cell_max_number":"cell_voltage_max_number",
+          "balance_current_a":"Balance_courant","mos_temp_c":"Mos_temp",
+          "temp1_c":"Sonde_1_temp","temp2_c":"Sonde_2_temp",
+          "temp3_c":"Sonde_3_temp","temp4_c":"Sonde_4_temp",
+          "temp5_c":"Sonde_5_temp",
+          "alarm_active":"BMS Alarm Active","alarm_text":"BMS Alarm List",
+          "balance_action":"Balance_Action",
+        }
+        skip_params=set(BY_KEY)
         for key,label,unit,dc,sc,category in MEASURES:
+            if key in skip_params or key=="cell_delta_mv":continue
             opts={"state_topic":root+"/state",
                   "value_template":"{{ value_json.get('"+key+"') }}",
                   "availability_topic":root+"/availability"}
@@ -375,74 +414,100 @@ class HomeAssistantMQTT:
             if dc:opts["device_class"]=dc
             if sc:opts["state_class"]=sc
             if category:opts["entity_category"]=category
+            if key=="voltage_v":opts["suggested_display_precision"]=1
+            elif key in ("cell_min_v","cell_max_v","cell_avg_v","cell_delta_v"):
+                opts["suggested_display_precision"]=3
+            elif key in ("current_a","balance_current_a"):opts["suggested_display_precision"]=3
             if key in {"temp1_c","temp2_c","mos_temp_c","temp3_c","temp4_c","temp5_c"}:
                 opts.pop("availability_topic")
                 opts["availability"]=[
                     {"topic":root+"/availability"},
                     {"topic":root+"/temperature/"+key+"/availability"}]
                 opts["availability_mode"]="all"
+            self._component(mac,key,"sensor",names.get(key,label),opts)
+        for key,label in [("cell_delta_v","cell_voltage_delta"),("cell_max_number","cell_voltage_max_number"),
+                           ("cell_min_number","cell_voltage_min_number")]:
+            opts={"state_topic":root+"/state",
+                  "value_template":"{{ value_json.get('"+key+"') }}",
+                  "availability_topic":root+"/availability"}
+            if key=="cell_delta_v":
+                opts.update({"unit_of_measurement":"V",
+                             "device_class":"voltage","state_class":"measurement",
+                             "suggested_display_precision":3})
+            else:opts["entity_category"]="diagnostic"
             self._component(mac,key,"sensor",label,opts)
         for key,label in BINARY_MEASURES:
-            self._component(mac,key,"binary_sensor",label,{
+            self._component(mac,key,"binary_sensor",names.get(key,label),{
                 "state_topic":root+"/state",
                 "value_template":"{% if value_json.get('"+key+"') is none %}None{% elif value_json.get('"+key+"') %}ON{% else %}OFF{% endif %}",
                 "payload_on":"ON","payload_off":"OFF",
                 "availability_topic":root+"/availability",
-                "entity_category":"diagnostic",
-                **({"device_class":"problem"} if key=="alarm_active" else {})
+                **({"entity_category":"diagnostic","device_class":"problem"} if key=="alarm_active"
+                   else {"entity_category":"diagnostic"})
             })
         for i in range(1,cells+1):
-            self._component(mac,f"cell_{i:02d}_v","sensor",f"Cellule {i:02d} tension",{
+            self._component(mac,f"cell_{i:02d}_v","sensor",f"Cell_{i}_volt",{
                 "state_topic":root+"/state",
                 "value_template":"{{ value_json.get('cell_%02d_v') }}"%i,
                 "unit_of_measurement":"V","device_class":"voltage",
-                "state_class":"measurement","availability_topic":root+"/availability"})
-            if i<=32:
-                self._component(mac,f"cell_{i:02d}_resistance_ohm","sensor",
-                    f"Cellule {i:02d} résistance",{
-                    "state_topic":root+"/state",
-                    "value_template":"{{ value_json.get('cell_%02d_resistance_ohm') }}"%i,
-                    "unit_of_measurement":"Ω","state_class":"measurement",
-                    "entity_category":"diagnostic",
-                    "availability_topic":root+"/availability"})
-        self._component(mac,"disable_temperature_sensors","switch",
-            "Désactiver surveillance thermique",{
-            "state_topic":root+"/temperature_control/state",
-            "command_topic":root+"/temperature_control/set",
-            "payload_on":"ON","payload_off":"OFF",
-            "optimistic":False,"retain":False,
-            "availability":[{"topic":root+"/availability"},
-               {"topic":root+"/temperature_control/availability"}],
-            "availability_mode":"all","entity_category":"config",
-            "icon":"mdi:thermometer-off",
-            "enabled_by_default":True,
-        })
-        self._component(mac,"arm_temperature_control","button",
-            "Armer commande thermique (30 s)",{
-            "command_topic":root+"/temperature_control/arm","payload_press":"PRESS",
-            "availability_topic":root+"/temperature_control/availability",
-            "entity_category":"config","icon":"mdi:shield-key",
-            "enabled_by_default":True,
-        })
-        self._component(mac,"command_status","sensor","Dernière commande thermique",{
-            "state_topic":root+"/command_status",
-            "availability_topic":root+"/availability",
-            "entity_category":"diagnostic",
+                "state_class":"measurement","suggested_display_precision":3,
+                "availability_topic":root+"/availability"})
+            self._component(mac,f"cell_{i:02d}_resistance_ohm","sensor",
+                f"Cell_{i}_ohm",{
+                "state_topic":root+"/state",
+                "value_template":"{{ value_json.get('cell_%02d_resistance_ohm') }}"%i,
+                "unit_of_measurement":"Ω","state_class":"measurement",
+                "suggested_display_precision":3,"entity_category":"diagnostic",
+                "availability_topic":root+"/availability"})
+        # Each documented setting has a single editable Number or Switch, not
+        # both a sensor and an editable entity with competing unique IDs.
+        for p in PARAMS:
+            options={
+                "state_topic":root+"/state",
+                "value_template":"{{ value_json.get('"+p.key+"') }}",
+                "command_topic":root+"/parameters/"+p.key+"/set",
+                "availability_topic":root+"/availability",
+                "entity_category":"config",
+                "optimistic":False,
+                "retain":False,
+            }
+            if p.kind=="switch":
+                options.update({"value_template":
+                    "{% if value_json.get('"+p.key+"') is none %}None{% elif value_json.get('"+p.key+"') %}ON{% else %}OFF{% endif %}",
+                    "payload_on":"ON","payload_off":"OFF"})
+            else:
+                options.update({"min":p.minimum,"max":p.maximum,"step":p.step,
+                                "mode":"box"})
+                if p.unit:options["unit_of_measurement"]=p.unit
+            self._component(mac,p.key,p.kind,p.label,options)
+        self._component(mac,"write_permission","switch",
+            "Autoriser modification paramètres",{
+                "state_topic":root+"/write_permission/state",
+                "command_topic":root+"/write_permission/set",
+                "payload_on":"ON","payload_off":"OFF",
+                "optimistic":False,"retain":False,
+                "availability_topic":root+"/availability",
+                "entity_category":"config","icon":"mdi:lock-open-variant"
+            })
+        self._component(mac,"command_status","sensor","Dernière commande paramètres",{
+            "state_topic":root+"/command_status","entity_category":"diagnostic",
+            "availability_topic":root+"/availability"
         })
         self.discovered_cells[mac]=max(self.discovered_cells.get(mac,0),cells)
 
     def rediscover(self)->None:
         for mac in self.addresses:
+            root=self.base(mac);identity=short_id(mac)
+            # Cleanup obsolete retained v0.2.1 discovery so HA does not
+            # display duplicate sensor/number entities or the old 30s button.
+            for key in ("cell_delta_mv", "cell_uvp_v","cell_ovp_v",
+                        "balance_start_v","max_charge_current_a","max_discharge_current_a"):
+                self.send(f"{self.discovery}/sensor/{identity}_{key}/config","")
+            self.send(f"{self.discovery}/button/{identity}_arm_temperature_control/config","")
+            self.send(f"{self.discovery}/switch/{identity}_disable_temperature_sensors/config","")
             self.discover(mac,max(16,self.discovered_cells.get(mac,16)))
+            self.emit(mac,"write_permission/state","OFF")
             self.emit(mac,"availability","offline")
-            self.emit(mac,"temperature_control/availability",
-                  "offline" if not self.cfg.get("allow_temperature_control",False) else
-                  ("online" if self.last_data.get(mac) and
-                   time.monotonic()-self.last_data[mac]<70 else "offline"))
-            self.emit(mac,"temperature_control/state",
-                ("ON" if self.settings[mac]["temperature_monitoring_disabled"] else "OFF")
-                if mac in self.settings and mac in self.last_confirmed and
-                time.monotonic()-self.last_confirmed[mac]<180 else "",retain=True)
             if mac in self.state:
                 self.emit(mac,"state",self.full_state(mac))
                 if time.monotonic()-self.last_data.get(mac,0)<70:
@@ -490,7 +555,7 @@ class HomeAssistantMQTT:
         with self._lock:
             for mac in self.addresses:
                 self.emit(mac,"availability","offline")
-                self.emit(mac,"temperature_control/availability","offline")
+                self.emit(mac,"write_permission/state","OFF")
         self.client.disconnect()
         self.client.loop_stop()
         self.connected=False
@@ -504,10 +569,10 @@ class HomeAssistantMQTT:
                 if self.online_cache.get(mac) != alive:
                     self.emit(mac,"availability","online" if alive else "offline")
                     self.online_cache[mac]=alive
-                self.emit(mac,"temperature_control/availability",
-                    "online" if alive and self.cfg.get("allow_temperature_control",False)
-                    else "offline")
-                if not alive:self.armed_until.pop(mac,None)
+
+                if not alive and self.permission.get(mac):
+                    self.permission[mac]=False
+                    self.emit(mac,"write_permission/state","OFF")
 
     def ingest(self,data:Any)->bool:
         if not self.enabled:return False
@@ -529,8 +594,7 @@ class HomeAssistantMQTT:
                 self._temps_available(mac,decoded)
                 self.emit(mac,"availability","online")
                 self.online_cache[mac]=True
-                if self.cfg.get("allow_temperature_control",False):
-                    self.emit(mac,"temperature_control/availability","online")
+
                 return True
             if kind=="frame" and data.get("frame_type") in (1,3):
                 frame_type=data["frame_type"]
@@ -541,8 +605,7 @@ class HomeAssistantMQTT:
                     if not parsed:return False
                     self.settings[mac]=parsed
                     self.last_confirmed[mac]=time.monotonic()
-                    self.emit(mac,"temperature_control/state",
-                         "ON" if parsed["temperature_monitoring_disabled"] else "OFF")
+                    LOG.info("JK settings frame validated for %s (%d parameters)",mac,len(parsed))
                 else:
                     self.info[mac]=parse_info(raw)
                 if mac in self.state:
@@ -550,8 +613,9 @@ class HomeAssistantMQTT:
                 return True
             if kind=="lifecycle" and data.get("event") in ("disconnected","stream_stale"):
                 self.emit(mac,"availability","offline")
-                self.emit(mac,"temperature_control/availability","offline")
                 self.last_data.pop(mac,None)
+                self.permission[mac]=False
+                self.emit(mac,"write_permission/state","OFF")
                 self.online_cache[mac]=False
                 self.armed_until.pop(mac,None)
                 return True

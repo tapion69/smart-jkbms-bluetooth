@@ -117,7 +117,8 @@ class MQTTTests(unittest.TestCase):
         frame=settings_frame()
         self.assertTrue(m.ingest({"kind":"frame","address":A,
            "frame_type":1,"raw_hex":frame}))
-        self.assertIn((m.base(A)+"/temperature_control/state","ON",1,True),c.published)
+        self.assertTrue(m.settings[A]["disable_temperature_sensors"])
+        self.assertEqual(m.full_state(A)["cell_ovp_v"],3.65)
         self.assertEqual(m.settings[A]["cell_ovp_v"],3.65)
         self.assertEqual(m.settings[A]["cell_uvp_v"],2.8)
         self.assertEqual(m.settings[A]["temperature_monitoring_disabled"],True)
@@ -133,7 +134,7 @@ class MQTTTests(unittest.TestCase):
         self.assertEqual(sw[0]["payload_on"],"ON")
         self.assertEqual(sw[0]["payload_off"],"OFF")
         self.assertIn("command_topic",sw[0])
-        self.assertEqual(sw[0]["availability_mode"],"all")
+        self.assertEqual(sw[0]["entity_category"],"config")
 
     def test_device_info_never_publishes_passwords(self):
         m,c=self.instance()
@@ -162,7 +163,7 @@ class MQTTTests(unittest.TestCase):
         m.on_connect(c,None,None,accepted,None)
         self.assertTrue(m.connected)
         cfg=[(topic,json.loads(payload)) for topic,payload,_,_ in c.published
-             if topic.endswith("/config")]
+             if topic.endswith("/config") and payload]
         self.assertGreater(len(cfg),100)
         self.assertEqual(
             {body["device"]["identifiers"][0] for _,body in cfg},
@@ -199,35 +200,78 @@ class MQTTTests(unittest.TestCase):
         m.ingest({"kind":"lifecycle","address":A,"event":"disconnected"})
         self.assertIn((m.base(A)+"/availability","offline",1,True),c.published)
 
-    def test_mqtt_protection_requires_optin_and_30s_arm(self):
+    def test_mqtt_parameters_permission_switch_no_timeout_and_readback_only(self):
         async def run():
             m,c=self.instance()
             m.loop=asyncio.get_running_loop()
             m.control=SimpleNamespace(dispatch=AsyncMock(return_value=(202,{"verified_by_bms":False})))
-            def publish(topic,text):
-                m.on_message(c,None,SimpleNamespace(topic=topic,payload=text))
-            set_topic=m.base(A)+"/temperature_control/set"
-            arm_topic=m.base(A)+"/temperature_control/arm"
-            publish(set_topic,b"ON")
+            m.ingest(sample_data(A))
+            m.ingest({"kind":"frame","address":A,
+                      "frame_type":1,"raw_hex":settings_frame()})
+            def send(topic,payload,retain=False):
+                m.on_message(c,None,SimpleNamespace(topic=topic,payload=payload,retain=retain))
+            gate=m.base(A)+"/write_permission/set"
+            setting=m.base(A)+"/parameters/cell_uvp_v/set"
+            send(setting,b"2.8")
             await asyncio.sleep(0.02)
             m.control.dispatch.assert_not_awaited()
+            # Add-on opt-in must be enabled as well as the explicit per-BMS HA switch.
+            send(gate,b"ON")
+            self.assertFalse(m.permission[A])
             m.cfg["allow_temperature_control"]=True
-            publish(set_topic,b"ON")
-            await asyncio.sleep(0.02)
-            m.control.dispatch.assert_not_awaited()
-            publish(arm_topic,b"PRESS")
-            publish(set_topic,b"ON")
+            send(gate,b"ON",retain=True)
+            self.assertFalse(m.permission[A])
+            send(gate,b"ON")
+            self.assertTrue(m.permission[A])
+            self.assertFalse(m.permission[B])
+            # No 30-second countdown: remaining ON until OFF/disconnect/restart.
+            m.last_data[A]=time.monotonic()
+            send(setting,b"2.8")
             await asyncio.sleep(0.05)
             m.control.dispatch.assert_awaited_once()
-            args=m.control.dispatch.await_args.args[0]
-            self.assertEqual(args["address"],A)
-            self.assertTrue(args["disable"])
+            cmd=m.control.dispatch.await_args.args[0]
+            self.assertEqual(cmd["register"],0x02)
+            self.assertEqual(cmd["value"],2.8)
+            self.assertEqual(cmd["address"],A)
+            self.assertEqual(m.full_state(A)["cell_uvp_v"],2.8)
+            # Sending command does not make an unverified state change.
+            self.assertFalse(any(
+              json.loads(payload).get("cell_uvp_v")==2.9
+              for topic,payload,_,_ in c.published
+              if topic==m.base(A)+"/state"))
             m.control.dispatch.reset_mock()
-            publish(set_topic,b"OFF")
+            send(gate,b"OFF")
+            send(setting,b"2.9")
             await asyncio.sleep(0.02)
             m.control.dispatch.assert_not_awaited()
-            self.assertFalse(any(t.endswith("temperature_control/state") for t,_,_,_ in c.published))
+            m.permission[A]=True
+            m.ingest({"kind":"lifecycle","address":A,"event":"disconnected"})
+            self.assertFalse(m.permission[A])
         asyncio.run(run())
+
+    def test_precision_names_and_volts_delta_discovery(self):
+        m,c=self.instance()
+        m.discover(A,16)
+        conf={topic:json.loads(value) for topic,value,_,_
+              in c.published if topic.endswith("/config") and value}
+        prefix=m.discovery
+        ident=short_id(A)
+        def item(component,key):
+            return conf[f"{prefix}/{component}/{ident}_{key}/config"]
+        self.assertEqual(item("sensor","cell_01_v")["name"],"Cell_1_volt")
+        self.assertEqual(item("sensor","cell_01_v")["suggested_display_precision"],3)
+        self.assertEqual(item("sensor","cell_16_v")["suggested_display_precision"],3)
+        self.assertEqual(item("sensor","cell_01_resistance_ohm")["name"],"Cell_1_ohm")
+        self.assertEqual(item("sensor","voltage_v")["name"],"Tension_Totale_volt")
+        self.assertEqual(item("sensor","voltage_v")["suggested_display_precision"],1)
+        self.assertEqual(item("sensor","cell_delta_v")["unit_of_measurement"],"V")
+        self.assertEqual(item("sensor","cell_delta_v")["suggested_display_precision"],3)
+        self.assertEqual(item("number","cell_uvp_v")["mode"],"box")
+        self.assertEqual(item("number","cell_uvp_v")["entity_category"],"config")
+        self.assertEqual(item("switch","balancer_enabled")["entity_category"],"config")
+        self.assertNotIn(f"{prefix}/button/{ident}_arm_temperature_control/config",conf)
+        self.assertNotIn(f"{prefix}/sensor/{ident}_cell_delta_mv/config",conf)
+        self.assertFalse(item("switch","write_permission")["optimistic"])
 
 
 if __name__=="__main__":

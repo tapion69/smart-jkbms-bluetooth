@@ -95,6 +95,39 @@ class TemperatureControlTests(unittest.TestCase):
             svc.unregister(A)
         asyncio.run(run())
 
+    def test_jk_parameter_write_is_allowlisted_and_nonoptimistic(self):
+        async def run():
+            cfg={"bms_addresses":A,"allow_temperature_control":True}
+            svc=ControlService(lambda:cfg,addresses)
+            queue=svc.register(A)
+            invalid=[
+                {"register":0x77,"value":42},
+                {"register":0x02,"value":5.0},
+                {"register":0x02,"value":"3.0"},
+                {"register":0x1D,"value":1},
+            ]
+            for args in invalid:
+                status,_=await svc.dispatch({
+                    "address":A,"action":"write_parameter",
+                    "confirmation":CONFIRM,**args})
+                self.assertIn(status,(400,403))
+            async def worker():
+                cmd=await asyncio.wait_for(queue.get(),2)
+                self.assertEqual(cmd.action,"write_parameter")
+                self.assertEqual(cmd.register,0x02)
+                self.assertEqual(cmd.value,2.65)
+                cmd.future.set_result({"register":"0x02"})
+            task=asyncio.create_task(worker())
+            status,result=await svc.dispatch({
+                "address":A,"action":"write_parameter",
+                "register":0x02,"value":2.65,"confirmation":CONFIRM})
+            await task
+            self.assertEqual(status,202)
+            self.assertTrue(result["write_sent"])
+            self.assertFalse(result["verified_by_bms"])
+            svc.unregister(A)
+        asyncio.run(run())
+
     def test_local_api_rejects_bad_token(self):
         async def run():
             svc=ControlService(lambda:{"bms_addresses":A},addresses)

@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.1.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.2.2.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -22,6 +22,7 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError
 
 from control import ControlService, temperature_control_frame
+from parameters import build_write
 
 LOG = logging.getLogger("smart_jkbms_ble")
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
@@ -357,6 +358,18 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                                 if command.action == "refresh":
                                     await send_read_handshake("manual_settings_refresh")
                                     result = {"requests_sent": ["0x97", "0x96"]}
+                                elif command.action == "write_parameter":
+                                    if write_char is None:
+                                        raise RuntimeError("BLE write characteristic unavailable")
+                                    packet = build_write(command.register,command.value)
+                                    response = "write-without-response" not in write_char.properties
+                                    await client.write_gatt_char(write_char,packet,response=response)
+                                    await forward("parameter_write_sent",address=address,
+                                      register=f"0x{command.register:02X}",
+                                      confirmed_by_bms=False)
+                                    await asyncio.sleep(0.5)
+                                    await send_read_handshake("verify_modified_parameter")
+                                    result={"register":f"0x{command.register:02X}"}
                                 elif command.action == "set_temperature_disabled":
                                     if write_char is None:
                                         raise RuntimeError("BLE write characteristic unavailable")
@@ -623,7 +636,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.2.1", note="JK02_mqtt_connection_callback_repair"
+        "bridge_start", version="0.2.2", note="JK02_mqtt_parameters_and_precision"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
