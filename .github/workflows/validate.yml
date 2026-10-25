@@ -43,3 +43,5 @@ jobs:
         run: node tests/test_raw_temperature.js
       - name: Read-only temperature monitoring switch tests
         run: node tests/test_temperature_switch.js
+      - name: Manual control Node-RED flow tests
+        run: node tests/test_temperature_control_flows.js

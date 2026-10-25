@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.10.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.1.16.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -21,6 +21,8 @@ from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError
 
+from control import ControlService, temperature_control_frame
+
 LOG = logging.getLogger("smart_jkbms_ble")
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
 MAC_PATTERN = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
@@ -28,6 +30,7 @@ JK_READ_COMMANDS = (0x97, 0x96)
 JK_WRITE_HEADER = bytes.fromhex("AA 55 90 EB")
 RESET_MARKER = Path("/data/.ble_adapter_reset_last")
 RESET_COOLDOWN_SECONDS = 3600
+CONTROL = ControlService(options=lambda: options(), addresses=lambda raw: addresses(raw))
 
 
 def build_read_command(command: int) -> bytes:
@@ -344,31 +347,64 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
 
             await send_read_handshake("initial")
             if persistent:
+                control_queue = CONTROL.register(address)
                 await forward("session_persistent", address=address)
-                while client.is_connected and not link_lost.is_set():
-                    # AT/CRLF heartbeats alone are not proof of telemetry.
-                    age = time.monotonic() - stream["last_data"]
-                    if age > 90:
-                        await forward("stream_stale", address=address,
-                                      no_data_seconds=round(age),
-                                      action="reconnect_this_BMS_only")
-                        break
-                    if (
-                        age > 45 and not stream["refresh_sent"]
-                        and bool(cfg.get("read_only_requests", True))
-                    ):
-                        stream["refresh_sent"] = True
-                        await forward("stream_refresh", address=address,
-                                      no_data_seconds=round(age))
-                        await send_read_handshake("stream_refresh")
-                    try:
-                        await asyncio.wait_for(link_lost.wait(), timeout=5)
-                    except asyncio.TimeoutError:
-                        pass
+                try:
+                    while client.is_connected and not link_lost.is_set():
+                        if not control_queue.empty():
+                            command = control_queue.get_nowait()
+                            try:
+                                if command.action == "refresh":
+                                    await send_read_handshake("manual_settings_refresh")
+                                    result = {"requests_sent": ["0x97", "0x96"]}
+                                elif command.action == "set_temperature_disabled":
+                                    if write_char is None:
+                                        raise RuntimeError("BLE write characteristic unavailable")
+                                    packet = temperature_control_frame(command.disable)
+                                    response = "write-without-response" not in write_char.properties
+                                    await client.write_gatt_char(write_char, packet, response=response)
+                                    await forward("temperature_protection_write_sent",
+                                                  address=address,
+                                                  disabled=command.disable,
+                                                  register="0x28",
+                                                  confirmed_by_bms=False)
+                                    await asyncio.sleep(0.5)
+                                    await send_read_handshake("verify_temperature_setting")
+                                    result = {"register": "0x28"}
+                                else:
+                                    raise RuntimeError("Unexpected command action")
+                                if not command.future.done():
+                                    command.future.set_result(result)
+                            except Exception as exc:
+                                if not command.future.done():
+                                    command.future.set_exception(exc)
+                        # AT/CRLF heartbeats alone are not proof of telemetry.
+                        age = time.monotonic() - stream["last_data"]
+                        if age > 90:
+                            await forward("stream_stale", address=address,
+                                          no_data_seconds=round(age),
+                                          action="reconnect_this_BMS_only")
+                            break
+                        if (
+                            age > 45 and not stream["refresh_sent"]
+                            and bool(cfg.get("read_only_requests", True))
+                        ):
+                            stream["refresh_sent"] = True
+                            await forward("stream_refresh", address=address,
+                                          no_data_seconds=round(age))
+                            await send_read_handshake("stream_refresh")
+                        try:
+                            await asyncio.wait_for(link_lost.wait(), timeout=1)
+                        except asyncio.TimeoutError:
+                            pass
+                finally:
+                    CONTROL.unregister(address)
             else:
                 await asyncio.sleep(listen)
             if client.is_connected:
                 await client.stop_notify(notify_char)
+            return
+
     except BleakDeviceNotFoundError as exc:
         LOG.warning("Discovered BLE device disappeared before connection: %s", address)
         await forward("connection_error", address=address, error=f"{type(exc).__name__}: {exc}", retry_on_next_scan=True)
@@ -587,7 +623,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.1.10", note="JK02_persistent_sessions_BlueZ_cache_recovery"
+        "bridge_start", version="0.1.16", note="JK02_explicit_temperature_control_optin"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -601,7 +637,11 @@ async def main() -> None:
         LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
     cfg = options()
     if bool(cfg.get("persistent_connections", True)):
-        await persistent_sessions(cfg)
+        await CONTROL.start()
+        try:
+            await persistent_sessions(cfg)
+        finally:
+            await CONTROL.close()
     else:
         await forward("legacy_probe_mode", mode="short_connections")
         while True:

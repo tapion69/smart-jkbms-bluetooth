@@ -1,10 +1,10 @@
 # Smart JK-BMS Bluetooth — Home Assistant add-on
 
-**Development milestone 0.1.15. Not yet a complete JK-BMS monitoring integration.**
+**Development milestone 0.1.16. Not yet a complete JK-BMS monitoring integration.**
 
 Standalone Bluetooth add-on following the clean repository structure of Smart Voltronic. It uses a local Bluetooth adapter (built into a mini-PC or a Home Assistant OS-compatible USB Bluetooth dongle) via BlueZ D-Bus and Bleak. A full **Node-RED editor is available on port 1895** for diagnostics and future JK-BMS decoding.
 
-## Included in v0.1.15 development milestone
+## Included in v0.1.16 development milestone
 
 - Home Assistant add-on configuration, Dockerfile and startup script.
 - Node-RED 5.0.9 editor, login `pi`, and the same pre-hashed bcrypt password as Smart Voltronic (stored in `settings.js`).
@@ -177,3 +177,13 @@ The `Disable Temp. Sensor` JK02_32S **configuration flag** is read from the chec
 In **JK-BMS | Mesures**, the new **SWITCH TEMPÉRATURES BMS1 / BMS2 (lecture seule)** Debug shows one line per configured BMS, rate-limited to once per minute unless the flag changes. It includes the address, current `Disable Temp. Sensor` flag, interpreted status, and raw bitmask `reg282`. The new Node-RED Function accepts only a correctly addressed, 300-byte, header- and checksum-verified settings frame (`type: 1`), not fragmented BLE events, and never exposes a clickable switch that would change the BMS.
 
 **Safety:** do not toggle this protection automatically. One temperature probe was physically cut on BMS 1; disabling the monitoring can remove temperature-related battery protections and does NOT guarantee that Modbus/RS485 responses will start working. RS485 `00 00` responses from the old add-on are not 300-byte telemetry frames. Check physical wiring and the RS485 protocol separately before enabling/disabling protection functions.
+
+## Manual, opt-in temperature monitoring control (v0.1.16)
+
+**Read before use.** The BLE JK02_32S switch `disable_temperature_sensors` writes register `0x28` with 4-byte value `1` (ON: **thermal monitoring DISABLED**) or `0` (OFF: thermal monitoring ENABLED). This can suppress safety functions on a lithium battery, particularly if a temperature probe has been physically cut. Only qualified users should test this on supervised, noncritical and noncharging battery equipment. The BMS's other protections and the circuit's independent thermal safeguards must remain operational. Never automate this setting; confirm the original setting and restore it after the test if safe to do so.
+
+The actual, **manual web switches** are at `http://<HOME_ASSISTANT_HOST>:1895/jk-bms/temperature` (e.g. on Tailscale). They are protected by HTTP Basic authentication using the **same `pi` credentials as the Node-RED editor**. This is a separate HTTP auth middleware; Node-RED adminAuth by itself does not secure custom HTTP endpoints. A same-origin JSON POST plus custom request header rejects browser cross-origin forms. The BLE control service binds **127.0.0.1:1896 only**, requires the private internal token, checks configured MAC addresses, validates one-time explicit confirmation in every write request, rate-limits writes, and executes them only on currently connected persistent sessions. No HTTP control port is exposed in add-on options or on the host.
+
+To enable a supervised one-time test, explicitly set `allow_temperature_control: true` in the add-on configuration and restart. It defaults to `false`. The page provides one toggle per configured BMS, plus a read-only **Relire les paramètres** button that sends the already-supported JK read requests `0x97/0x96`. **The toggle is not optimistic:** its position is confirmed only by a **CRC-valid type `0x01` settings frame** with bit `0x0002` at offset 282. Without a recent type-0x01 frame, the display shows `INCONNU` even after a command: "write sent" is NOT "setting accepted". We have not yet confirmed that both of the user's BMSs actually emit settings frames. Do not claim the test succeeded until the setting is independently verified in the JK app or from a fresh `0x01` frame. Use an external battery monitor during the test.
+
+Commands are **never triggered automatically** at startup or by dashboard refresh, and are **never published via MQTT**. No other battery registers are writable through this endpoint. Previous custom Node-RED flows are backed up and preserved.

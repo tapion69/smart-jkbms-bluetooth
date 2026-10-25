@@ -288,6 +288,29 @@ class MergeFlowsTests(unittest.TestCase):
             self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
 
 
+    def test_manual_temperature_page_upgrade_is_nondestructive(self):
+        dir=ROOT / "smart-jkbms-bluetooth"
+        packages=[PACKAGED,DECODER,
+            dir/"summary_flows.json",dir/"health_flows.json",
+            dir/"short_diagnostics_flows.json",dir/"raw_temperature_flows.json",
+            dir/"temperature_switch_flows.json",dir/"temperature_control_flows.json"]
+        installed=[n for file in packages[:-1] for n in json.loads(file.read_text())]
+        assembler=next(n for n in installed if n["id"]=="65ad8ac512b5e001")
+        assembler["wires"][0]=[n for n in assembler["wires"][0] if n!="b161600000000010"]
+        custom={"id":"my_dashboard","type":"comment","name":"User setup unchanged"}
+        installed.append(custom)
+        with tempfile.TemporaryDirectory() as td:
+            dst=Path(td)/"flows.json"
+            dst.write_text(json.dumps(installed))
+            mod.merge(dst,*packages)
+            new={n["id"]:n for n in json.loads(dst.read_text())}
+            self.assertIn("b161600000000010",new["65ad8ac512b5e001"]["wires"][0])
+            self.assertEqual(new["my_dashboard"],custom)
+            self.assertIn("b161600000000002",new)
+            self.assertEqual(mod.merge(dst,*packages),0)
+            self.assertEqual(len(list(Path(td).glob("*.bak"))),1)
+
+
 
 if __name__ == "__main__":
     unittest.main()
