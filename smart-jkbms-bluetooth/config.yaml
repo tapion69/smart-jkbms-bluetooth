@@ -1,5 +1,5 @@
 name: Smart JK-BMS Bluetooth (Development)
-version: "0.2.8"
+version: "0.3.0"
 slug: smart_jkbms_ble
 description: Experimental JK-BMS Bluetooth bridge and Node-RED diagnostics
 startup: services
@@ -34,7 +34,7 @@ options:
   mqtt_topic_prefix: smart_jkbms_ble
   mqtt_discovery_prefix: homeassistant
   debug_mode: true
-  send_bip: true
+  send_bip: false
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
   scan_interval_seconds: int(20,300)
