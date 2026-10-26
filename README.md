@@ -4,7 +4,7 @@
 
 # Smart JK-BMS Bluetooth for Home Assistant
 
-**Development preview — v0.3.2. Testers wanted!**
+**Development preview — v0.3.3. Testers wanted!**
 
 An experimental, community-tested Home Assistant add-on for monitoring multiple JK-BMS batteries over Bluetooth Low Energy (BLE). The add-on combines a Python/Bleak connection manager, a lightweight Node-RED frame decoder and MQTT Discovery so supported JK-BMS readings appear as native Home Assistant entities. It is **free to use**.
 
@@ -131,6 +131,10 @@ When reporting an issue, please include the add-on version, Home Assistant versi
 ## Optional installation BIP (privacy and setup)
 
 The add-on includes a separate Node-RED **JK-BMS - BIP** flow based on the same Google Apps Script installation counter design as Smart Energy Finance. It does not affect the BLE, decoding or MQTT flows.
+
+From v0.3.3, the Node-RED **POST Google JK-BMS** request node has the real collector URL entered directly in its URL field (matching Smart Energy Finance). The BIP flow uses `followRedirects = false` for POST and separately performs a safe **GET** on the Google ContentService redirect to read the response JSON. A plain HTTP 302 is not considered proof of registration. Look for **Google JK-BMS created** or **Google JK-BMS updated** on the `BIP result` node; if Google returns `module ou onglet inconnu : jkbms`, publish the updated Apps Script deployment first. A Debug node connected to `BIP result` receives the sanitized success/error information without the installation identifier.
+
+Updates migrate the original packaged v0.3.2 BIP nodes automatically and retain any user-added Debug nodes. User-edited/custom BIP Function nodes are never overwritten; compare them with the new package if the fix is not applied automatically.
 
 **Enabled by default.** Installation counting is optional and can be switched off at any time:
 ```yaml
