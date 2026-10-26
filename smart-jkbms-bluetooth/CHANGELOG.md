@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5 — Non-blocking IP geolocation timeout (development preview)
+
+- **Fixed** the Google BIP failure caused by `ipwho.is` timeouts being forwarded as `statusCode: "ETIMEDOUT"` with `responseUrl: https://ipwho.is/`. Node-RED HTTP requests can produce ordinary output error messages without triggering a Catch node.
+- Added **Check GEO reply / continue BIP**, between geolocation and Google: accept valid HTTP 200 / `success: true`, otherwise continue with empty geographic fields. Clears the stale `statusCode`, `responseUrl`, request/redirect headers and timeout metadata before the independent Google POST.
+- A bounded timeout is requested for the optional lookup. If Node-RED reports the error both on its regular output and through a Catch event, de-duplicate by message ID to avoid two BIPs.
+- The existing v0.3.4 Node-RED flow is automatically migrated if its source nodes are unchanged; extra Debug wiring and customized Functions remain untouched. Migration backs up the previous flow.
+- Unchanged: the persistent installation ID, daily/startup BIP schedule, user opt-outs, Google Apps Script endpoint, multiple BMS support, Bluetooth/MQTT behavior and write safeguards.
+- Google Sheets retains one row per installation even when the location provider is unavailable. Geographic columns are populated on a later successful location lookup.
+- Tests include an actual `ETIMEDOUT`-shaped response, successful IP location, catch+output duplication, stale HTTP metadata cleanup, and installed v0.3.4 migration.
+
 ## 0.3.4 — Finance-style BIP location fields (development preview)
 
 - Fixed blank `country`, `region`, `city`, `lat` and `lon` columns in Google Sheets by restoring a lookup using `https://ipwho.is/`, following the Smart Energy Finance BIP flow.
