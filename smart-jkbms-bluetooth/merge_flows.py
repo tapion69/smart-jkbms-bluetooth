@@ -304,6 +304,51 @@ def upgrade_stock_geo_timeout(current: dict, packaged: dict) -> int:
     return changed
 
 
+# Exact v0.3.5 shipped Function sources; update only vendor-owned code.
+# Do not rewrite a user-edited BIP function or its Debug wiring.
+STOCK_SINGLE_BIP_035 = {
+    "jkbms_bip_geo_gate_0304": (418, "7252dcab2e20d265"),
+    "jkbms_bip_payload_0303": (1584, "689346e3b60d7401"),
+}
+
+
+def simplify_stock_bip_options(current: dict, packaged: dict) -> int:
+    """Remove the redundant BIP GEO toggle from stock Node-RED functions.
+
+    The one upstream send_bip gate remains the sole permission control.
+    IP location still runs and falls back when unavailable.
+    """
+    changed=0
+    for node_id,(length, fingerprint) in STOCK_SINGLE_BIP_035.items():
+        node=current.get(node_id)
+        wanted=packaged.get(node_id)
+        if not isinstance(node,dict) or not isinstance(wanted,dict):
+            continue
+        if node.get("type")!="function":
+            continue
+        # Do not overwrite a user-renamed or customized Function.
+        accepted_names={
+            "jkbms_bip_geo_gate_0304":{"Géolocalisation autorisée ?","Localisation BIP"},
+            "jkbms_bip_payload_0303":{"Prépare Google JK-BMS"}
+        }[node_id]
+        if node.get("name") not in accepted_names:
+            continue
+        current_code=node.get("func")
+        if not isinstance(current_code,str):
+            continue
+        old_stock=(len(current_code),legacy_fingerprint(current_code))==(length,fingerprint)
+        new_stock=current_code==wanted.get("func")
+        if not old_stock and not new_stock:
+            print(f"[WARN] Custom BIP Function {node_id} preserved")
+            continue
+        if node.get("name")!=wanted.get("name") or current_code!=wanted.get("func"):
+            node["name"]=wanted["name"]
+            node["func"]=wanted["func"]
+            changed+=1
+            print(f"[INFO] Simplified stock BIP Function {node_id} (send_bip only)")
+    return changed
+
+
 def _legacy_default(node: dict, manifest: dict) -> bool:
     """Remove only the exact published vendor node (never a user-edited one)."""
     if (node.get("id") != manifest["id"] or
@@ -345,6 +390,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     updated_bip = update_stock_bip(by_id, packaged_by_id)
     updated_bip_geo = update_stock_bip_geo(by_id, packaged_by_id)
     updated_geo_timeout = upgrade_stock_geo_timeout(by_id, packaged_by_id)
+    updated_single_bip = simplify_stock_bip_options(by_id, packaged_by_id)
 
     # A retired vendor file must not be reimported indefinitely: migrate away
     # its stock nodes, including its Debug, Inject and HTML page. A renamed
@@ -372,7 +418,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
 
     new_current = [n for n in current if not isinstance(n,dict)
                    or n.get("id") not in matching]
-    changed = bool(updated_functions or updated_bip or updated_bip_geo or updated_geo_timeout or matching)
+    changed = bool(updated_functions or updated_bip or updated_bip_geo or updated_geo_timeout or updated_single_bip or matching)
 
     if matching:
         for node in new_current:
@@ -446,7 +492,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     print(f"[INFO] Node-RED cleanup: removed {len(matching)} legacy nodes, "
           f"added {len(additions)}, migrated {updated_functions} stock functions, "
           f"upgraded {updated_bip} old BIP, {updated_bip_geo} geo, "
-          f"{updated_geo_timeout} timeout nodes; "
+          f"{updated_geo_timeout} timeout nodes, {updated_single_bip} one-switch BIP nodes; "
           f"{before_count} -> {len(new_current)} nodes; backup {backup.name}")
     return len(additions)
 
