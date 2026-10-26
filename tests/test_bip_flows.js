@@ -11,7 +11,7 @@ const redirect=named("Vérifier redirection Google");
 const get=named("GET Google JSON (no POST replay)");
 const result=named("BIP result");
 const inject=named("Startup + daily BIP");
-const geoGate=named("Géolocalisation autorisée ?");
+const geoGate=named("Localisation BIP");
 const geoGet=named("geoloc (ipwho.is)");
 const geoCatch=named("Geo connection errors");
 const geoFallback=named("Geo unavailable (continue BIP)");
@@ -42,8 +42,11 @@ assert.deepEqual(redirect.wires,[[get.id],[result.id]]);
 const config=fs.readFileSync(path.join(root,"config.yaml"),"utf8");
 const runner=fs.readFileSync(path.join(root,"run.sh"),"utf8");
 assert.match(config,/^  send_bip: true$/m);
-assert.match(config,/^  bip_geolocation: true$/m);
-assert.match(runner,/BIP_GEOLOCATION/);
+assert(!config.includes("bip_geolocation"));
+assert(!config.includes("bip_endpoint"));
+assert(!runner.includes("BIP_GEOLOCATION"));
+assert(!geoGate.func.includes("BIP_GEOLOCATION"));
+assert(!prepare.func.includes("BIP_GEOLOCATION"));
 assert(config.includes(url));
 assert.match(runner,/\.send_bip \/\/ true/);
 const version=config.match(/^version: "([^"]+)"$/m)[1];
@@ -59,7 +62,7 @@ function simulate(nodeDef,msg,envValues={}){
  const val=vm.runInNewContext("(function(){"+nodeDef.func+"\n})()",context);
  return {value:val,statuses,warnings};
 }
-const env={SEND_BIP:"true",BIP_GEOLOCATION:"true",SMART_JKBMS_INSTALL_ID:id,SMART_JKBMS_VERSION:version};
+const env={SEND_BIP:"true",SMART_JKBMS_INSTALL_ID:id,SMART_JKBMS_VERSION:version};
 assert.equal(simulate(gate,{payload:123},{...env,SEND_BIP:"false"}).value,null);
 assert.equal(simulate(gate,{payload:123},{...env,SMART_JKBMS_INSTALL_ID:"bad"}).value,null);
 let m=simulate(gate,{payload:123},env).value;
@@ -85,10 +88,11 @@ assert.equal(m.payload.region,"Auvergne-Rhône-Alpes");
 assert.equal(m.payload.city,"Lyon");
 assert.equal(m.payload.lat,45.7);
 assert.equal(m.payload.lon,4.8);
-const noGeo=simulate(geoGate,simulate(os,simulate(gate,{payload:5},env).value,env).value,{...env,BIP_GEOLOCATION:"false"}).value;
-assert.equal(noGeo[0],null);
-const noGeoPayload=simulate(prepare,noGeo[1],{...env,BIP_GEOLOCATION:"false"}).value.payload;
-for(const field of ["country","region","city","lat","lon"]) assert.equal(noGeoPayload[field],"");
+// send_bip is the only toggle; when disabled, the whole pipeline stops.
+assert.equal(simulate(gate,{payload:5},{...env,SEND_BIP:"false"}).value,null);
+// A missing IP result still sends one installation heartbeat.
+const blankGeo=simulate(prepare,{...geoBranch[0],payload:{success:false}},env).value.payload;
+for(const field of ["country","region","city","lat","lon"]) assert.equal(blankGeo[field],"");
 const timeoutMsg={...geoBranch[0],_msgid:"timeout-test",statusCode:"ETIMEDOUT",
  responseUrl:"https://ipwho.is/",redirectList:[],retry:0,
  payload:"no response from server",followRedirects:false,requestTimeout:5500};
