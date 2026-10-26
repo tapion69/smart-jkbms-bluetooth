@@ -59,4 +59,12 @@ This is a development release. Tests on different JK-BMS hardware and firmware v
 
 The add-on is **free**. Development, Bluetooth reverse-engineering and support take time. If you find it useful, a small [**Ko-fi ☕**](https://ko-fi.com/tapion69) is always appreciated — never required.
 
+## License
+
+Copyright © 2026 **Tapion69**.
+
+**Free for personal and non-commercial use.** You may install the add-on and privately adapt it without a license key or prior approval. **Redistribution, rebranding, resale, publication of modified copies, and commercial integration require written permission.**
+
+This is **source-available software, not an open-source license**. Third-party dependencies retain their own licenses. See the [LICENSE](LICENSE) file for full terms.
+
 [Source code and updates](https://github.com/tapion69/smart-jkbms-bluetooth)
