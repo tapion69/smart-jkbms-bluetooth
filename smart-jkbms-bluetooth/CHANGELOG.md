@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6 — Simplified BIP configuration and shorter README (development preview)
+
+- Keep **one** BIP setting: `send_bip` (enabled by default; `false` disables the complete BIP process).
+- Remove the redundant `bip_geolocation` setting and the unused `bip_endpoint` configuration field. The Google POST node keeps the established collector URL directly.
+- With `send_bip: true`, geographic information for the installation map is still requested automatically from `ipwho.is`. If the service times out or fails, Google still receives the installation heartbeat, without the geographic fields. No new installation ID is generated.
+- Upgrade the packaged v0.3.5 Node-RED functions on restart, preserving user-created flows, Debug wiring and custom function code.
+- Rewrite the English README as a short setup guide with clear multi-BMS instructions and Ko-fi support.
+- Bluetooth/MQTT telemetry, BMS protections, and the existing Voltronic/Finance Google Sheets handling are unchanged.
+
 ## 0.3.5 — Non-blocking IP geolocation timeout (development preview)
 
 - **Fixed** the Google BIP failure caused by `ipwho.is` timeouts being forwarded as `statusCode: "ETIMEDOUT"` with `responseUrl: https://ipwho.is/`. Node-RED HTTP requests can produce ordinary output error messages without triggering a Catch node.
