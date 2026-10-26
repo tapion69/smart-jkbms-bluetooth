@@ -3,6 +3,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "smart-jkbms-bluetooth" / "ble"))
@@ -33,13 +34,13 @@ class TemperatureControlTests(unittest.TestCase):
 
     def test_manual_writes_default_off_and_require_authorization(self):
         async def run():
-            cfg={"bms_addresses":A+","+B,"allow_temperature_control":False}
+            cfg={"bms_addresses":A+","+B,"allow_parameter_changes":False}
             svc=ControlService(lambda:cfg,addresses)
             svc.register(A)
             status,body=await svc.dispatch({"address":A,"action":"set_temperature_disabled",
                 "disable":True,"confirmation":CONFIRM})
             self.assertEqual(status,403)
-            cfg["allow_temperature_control"]=True
+            cfg["allow_parameter_changes"]=True
             for candidate in [
                 {"address":A,"action":"set_temperature_disabled","disable":True},
                 {"address":A,"action":"set_temperature_disabled","disable":1,"confirmation":CONFIRM},
@@ -53,8 +54,9 @@ class TemperatureControlTests(unittest.TestCase):
 
     def test_connected_manual_write_reports_sent_not_confirmed(self):
         async def run():
-            cfg={"bms_addresses":A+","+B,"allow_temperature_control":True}
+            cfg={"bms_addresses":A+","+B,"allow_parameter_changes":True}
             svc=ControlService(lambda:cfg,addresses)
+            svc.mqtt_sink=SimpleNamespace(permission={A:True})
             queue=svc.register(A)
             async def worker():
                 cmd=await asyncio.wait_for(queue.get(),2)
@@ -77,8 +79,9 @@ class TemperatureControlTests(unittest.TestCase):
 
     def test_disconnected_and_rate_limit_dont_queue_writes(self):
         async def run():
-            cfg={"bms_addresses":A,"allow_temperature_control":True}
+            cfg={"bms_addresses":A,"allow_parameter_changes":True}
             svc=ControlService(lambda:cfg,addresses)
+            svc.mqtt_sink=SimpleNamespace(permission={A:True})
             status,body=await svc.dispatch({"address":A,"action":"set_temperature_disabled",
                 "disable":True,"confirmation":CONFIRM})
             self.assertEqual(status,409)
@@ -97,8 +100,9 @@ class TemperatureControlTests(unittest.TestCase):
 
     def test_jk_parameter_write_is_allowlisted_and_nonoptimistic(self):
         async def run():
-            cfg={"bms_addresses":A,"allow_temperature_control":True}
+            cfg={"bms_addresses":A,"allow_parameter_changes":True}
             svc=ControlService(lambda:cfg,addresses)
+            svc.mqtt_sink=SimpleNamespace(permission={A:True})
             queue=svc.register(A)
             invalid=[
                 {"register":0x77,"value":42},
@@ -128,17 +132,13 @@ class TemperatureControlTests(unittest.TestCase):
             svc.unregister(A)
         asyncio.run(run())
 
-    def test_read_only_refresh_option_blocks_dangerous_fallback(self):
+    def test_read_only_refresh_is_always_available_and_does_not_write(self):
         async def run():
-            cfg={"bms_addresses":A,"allow_temperature_control":True,
-                 "read_only_requests":False}
+            # The former read_only_requests option was removed from public
+            # config. Reading settings remains available without write consent.
+            cfg={"bms_addresses":A,"allow_parameter_changes":False}
             svc=ControlService(lambda:cfg,addresses)
             queue=svc.register(A)
-            status,body=await svc.dispatch({"address":A,"action":"refresh"})
-            self.assertEqual(status,403)
-            self.assertEqual(body["error"],"read_only_requests_disabled")
-            self.assertTrue(queue.empty())
-            cfg["read_only_requests"]=True
             async def respond():
                 cmd=await asyncio.wait_for(queue.get(),1)
                 self.assertEqual(cmd.action,"refresh")
@@ -148,7 +148,7 @@ class TemperatureControlTests(unittest.TestCase):
             await worker
             self.assertEqual(status,202)
             self.assertEqual(body["requests_sent"],["0x96"])
-            self.assertFalse(body["verified_by_bms"])
+            self.assertFalse(body["write_sent"])
             svc.unregister(A)
         asyncio.run(run())
 
