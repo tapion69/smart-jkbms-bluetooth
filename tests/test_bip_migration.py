@@ -34,6 +34,57 @@ class BipFlowMigrationTests(unittest.TestCase):
             self.assertEqual(len(json.loads(installed.read_text())), len(merged))
             self.assertTrue(list(Path(directory).glob("flows.json.*.bak")))
 
+    def test_v032_stock_bip_repaired_without_losing_attached_debug(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "flows.json"
+            packages = [ROOT / name for name in
+                        ("flows.json", "decoder_flows.json", "mqtt_flows.json",
+                         "bip_flows.json")]
+            old = json.loads((Path(__file__).resolve().parent / "fixtures"
+                             / "bip_v032.json").read_text(encoding="utf-8"))
+            reporter = next(n for n in old if n.get("id")=="jkbms_bip_report_0301")
+            reporter["wires"][0].append("custom_debug_user")
+            old.append({"id": "custom_debug_user", "type": "debug",
+                        "z": "jkbms_bip_tab_0301", "name": "my debug",
+                        "wires": []})
+            installed.write_text(json.dumps(old), encoding="utf-8")
+            added = merge_mod.merge(installed, *packages)
+            current = json.loads(installed.read_text(encoding="utf-8"))
+            by_id = {n["id"]: n for n in current}
+            self.assertGreater(added, 0)
+            self.assertEqual(by_id["jkbms_bip_http_0301"]["method"],"POST")
+            self.assertTrue(by_id["jkbms_bip_http_0301"]["url"].startswith(
+                "https://script.google.com/macros/s/"))
+            self.assertEqual(by_id["jkbms_bip_http_0301"]["wires"][0],
+                             ["jkbms_bip_redirect_0303"])
+            self.assertEqual(by_id["jkbms_bip_prepare_0301"]["wires"][0],
+                             ["jkbms_bip_environment_0303"])
+            self.assertIn("custom_debug_user",
+                          by_id["jkbms_bip_report_0301"]["wires"][0])
+            self.assertIn("created", by_id["jkbms_bip_report_0301"]["func"])
+            self.assertEqual(merge_mod.merge(installed, *packages),0)
+            second = json.loads(installed.read_text(encoding="utf-8"))
+            self.assertEqual(current,second)
+            self.assertTrue(list(Path(directory).glob("flows.json.*.bak")))
+
+    def test_user_edited_bip_function_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "flows.json"
+            old = json.loads((Path(__file__).resolve().parent / "fixtures"
+                             / "bip_v032.json").read_text(encoding="utf-8"))
+            gate = next(n for n in old if n["id"]=="jkbms_bip_prepare_0301")
+            gate["func"]="return null; // user customization"
+            installed.write_text(json.dumps(old),encoding="utf-8")
+            packages = [ROOT / name for name in
+                        ("flows.json", "decoder_flows.json", "mqtt_flows.json",
+                         "bip_flows.json")]
+            merge_mod.merge(installed,*packages)
+            current = {n["id"]:n for n in json.loads(installed.read_text())}
+            self.assertEqual(current["jkbms_bip_prepare_0301"]["func"],
+                             "return null; // user customization")
+            self.assertEqual(current["jkbms_bip_prepare_0301"]["wires"],
+                             gate["wires"])
+
     def test_separate_bip_tab_and_no_ble_pipeline_wires(self):
         nodes = json.loads((ROOT / "bip_flows.json").read_text(encoding="utf-8"))
         self.assertEqual(len({n["id"] for n in nodes}), len(nodes))
