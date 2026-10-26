@@ -28,10 +28,10 @@ configuration:
     description: Désactivé par défaut. Coupe tous les appareils de cet adaptateur. Choisir explicitement hci0/hci1/hci2/hci3 (pas auto).
   send_bip:
     name: Comptage anonyme des installations (en développement)
-    description: Envoi volontaire d'un BIP au démarrage et une fois par jour. ID aléatoire, module et version uniquement. Désactivé par défaut.
+    description: Activé par défaut. Envoi au démarrage et une fois par jour d'un identifiant d'installation aléatoire, du module et de la version. Désactiver pour refuser l'envoi.
   bip_endpoint:
     name: Adresse HTTPS du collecteur BIP
-    description: URL /exec de l'application Web Google Apps Script. Vider ce champ pour empêcher l'envoi. N'utiliser qu'un collecteur de confiance.
+    description: URL /exec de l'application Web Google Apps Script. Collecteur du projet préconfiguré. Désactiver send_bip pour arrêter les envois.
   debug_mode:
     name: Diagnostic détaillé
     description: Réservé aux tests initiaux.
