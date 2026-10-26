@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "JK-BMS - BIP",
     "disabled": false,
-    "info": "BIP based on the Finance flow: daily/startup trigger, consent, environment, Google POST fixed URL, GET redirect response and explicit created/updated confirmation. No MAC, BMS telemetry or IP geolocation."
+    "info": "Finance-style BIP: default-on heartbeat, optional ipwho.is IP geolocation (country/region/city/approximate lat/lon), registered through Apps Script. No BMS measurements/MAC/serial sent. Geo service errors fall back to plain heartbeat."
   },
   {
     "id": "jkbms_bip_inject_0301",
@@ -105,7 +105,7 @@
     "y": 100,
     "wires": [
       [
-        "jkbms_bip_payload_0303"
+        "jkbms_bip_geo_gate_0304"
       ]
     ]
   },
@@ -114,14 +114,14 @@
     "type": "function",
     "z": "jkbms_bip_tab_0301",
     "name": "Prépare Google JK-BMS",
-    "func": "// Finance-compatible collector payload, without battery or location details.\nconst version=String(env.get(\"SMART_JKBMS_VERSION\") || \"\").trim();\nif (!msg.bipInstallId || !version) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP ID/version missing\"});\n    return null;\n}\nmsg.payload={\n    module:\"jkbms\",\n    install_id:msg.bipInstallId,\n    bip:String((msg.telemetry||{}).bipBase || 1)+\"0\",\n    version:version,\n    country:\"\",region:\"\",city:\"\",lat:\"\",lon:\"\"\n};\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false; // Finance: never auto-repeat POST on redirect.\ndelete msg.url;\ndelete msg.method;\nnode.status({fill:\"blue\",shape:\"dot\",text:\"v\"+version+\" / BIP \"+msg.payload.bip});\nreturn msg;",
+    "func": "// Finance-style optional IP geolocation: this lookup is only performed\n// after BIP permission and can be disabled separately in add-on settings.\nconst version=String(env.get(\"SMART_JKBMS_VERSION\") || \"\").trim();\nif (!msg.bipInstallId || !version) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP ID/version missing\"});\n    return null;\n}\nconst geo=msg.payload && typeof msg.payload===\"object\" ? msg.payload : {};\nconst geoAllowed=String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\";\nconst found=geoAllowed && geo.success===true;\nconst clean=(s)=>typeof s===\"string\" ? s.trim().slice(0,120) : \"\";\nconst coord=(v,min,max)=>v!==\"\" && v!==null && v!==undefined &&\n    Number.isFinite(Number(v)) && Number(v)>=min && Number(v)<=max\n    ? Number(v) : \"\";\nconst country=found ? clean(geo.country) : \"\";\nconst region=found ? clean(geo.region) : \"\";\nconst city=found ? clean(geo.city) : \"\";\nconst lat=found ? coord(geo.latitude,-90,90) : \"\";\nconst lon=found ? coord(geo.longitude,-180,180) : \"\";\nmsg.payload={\n    module:\"jkbms\",\n    install_id:msg.bipInstallId,\n    bip:String((msg.telemetry||{}).bipBase || 1)+\"0\",\n    version:version,\n    country,region,city,lat,lon\n};\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false;\ndelete msg.url;\ndelete msg.method;\n// No raw geolocation response, network IP, or BMS data passed to Google.\nconst label=found ? (city || country || \"location available\") : \"location unavailable\";\nnode.status({fill:found?\"green\":\"yellow\",shape:\"dot\",\n    text:\"v\"+version+\" | BIP \"+msg.payload.bip+\" | \"+label});\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 775,
-    "y": 100,
+    "x": 1390,
+    "y": 80,
     "wires": [
       [
         "jkbms_bip_http_0301"
@@ -170,6 +170,88 @@
     "wires": [
       [
         "jkbms_bip_report_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_geo_gate_0304",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Géolocalisation autorisée ?",
+    "func": "// Independent opt-out for approximate IP-based BIP location.\nif (String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\") {\n    node.status({fill:\"blue\",shape:\"dot\",text:\"IP location enabled\"});\n    return [msg,null];\n}\nmsg.payload={success:false};\nnode.status({fill:\"grey\",shape:\"ring\",text:\"IP location disabled\"});\nreturn [null,msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 740,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_geo_http_0304"
+      ],
+      [
+        "jkbms_bip_payload_0303"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_geo_http_0304",
+    "type": "http request",
+    "z": "jkbms_bip_tab_0301",
+    "name": "geoloc (ipwho.is)",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "https://ipwho.is/",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "requestTimeout": "8000",
+    "x": 960,
+    "y": 80,
+    "wires": [
+      [
+        "jkbms_bip_payload_0303"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_geo_catch_0304",
+    "type": "catch",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Geo connection errors",
+    "scope": [
+      "jkbms_bip_geo_http_0304"
+    ],
+    "uncaught": false,
+    "x": 1020,
+    "y": 170,
+    "wires": [
+      [
+        "jkbms_bip_geo_fallback_0304"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_geo_fallback_0304",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Geo unavailable (continue BIP)",
+    "func": "// Do not block installation counting if the location provider is offline.\nnode.warn(\"JK-BMS BIP: IP geolocation unavailable; sending heartbeat without location\");\nmsg.payload={success:false};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1270,
+    "y": 170,
+    "wires": [
+      [
+        "jkbms_bip_payload_0303"
       ]
     ]
   }
