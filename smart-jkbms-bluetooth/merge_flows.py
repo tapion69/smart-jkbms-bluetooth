@@ -177,6 +177,57 @@ def update_stock_bip(current_by_id: dict, packaged_by_id: dict) -> int:
     return changed
 
 
+# Exact published v0.3.3 BIP function sources; geolocation migration must
+# not overwrite any code or wiring customized in the Node-RED editor.
+STOCK_BIP_033_GEO = {
+    "jkbms_bip_environment_0303": (
+        "Analyse environnement", 283, "a90ef86315ac14d5"),
+    "jkbms_bip_payload_0303": (
+        "Prépare Google JK-BMS", 720, "54dae6cdba1e67a6"),
+}
+
+
+def update_stock_bip_geo(current_by_id: dict, packaged_by_id: dict) -> int:
+    """Add IP geolocation for official v0.3.3 BIP installs, non-destructively.
+
+    Update stock Function code only when exact source fingerprint matches;
+    maintain extra user wires (e.g. Debug) and take a backup through merge().
+    """
+    changed = 0
+    analysis_id = "jkbms_bip_environment_0303"
+    old_next_id = "jkbms_bip_payload_0303"
+    geo_gate_id = "jkbms_bip_geo_gate_0304"
+    for node_id, (name, length, fp) in STOCK_BIP_033_GEO.items():
+        node = current_by_id.get(node_id)
+        desired = packaged_by_id.get(node_id)
+        if not isinstance(node, dict) or not isinstance(desired, dict):
+            continue
+        original = node.get("func")
+        if node.get("type") != "function" or node.get("name") != name:
+            continue
+        if original == desired.get("func"):
+            continue
+        if not isinstance(original, str) or (
+                len(original), legacy_fingerprint(original)) != (length, fp):
+            print(f"[WARN] Custom BIP Function {node_id} preserved; "
+                  "configure geographic lookup manually if desired")
+            continue
+        if node_id == analysis_id:
+            wires = node.get("wires")
+            if not (isinstance(wires, list) and wires
+                    and isinstance(wires[0], list)):
+                print("[WARN] Custom BIP environment wiring preserved")
+                continue
+            extra = [target for target in wires[0]
+                     if target not in (old_next_id, geo_gate_id)]
+            wires[0] = [geo_gate_id] + extra
+        node["func"] = desired["func"]
+        changed += 1
+        print(f"[INFO] Upgraded stock v0.3.3 BIP Function {node_id} for "
+              "Finance-style approximate IP location")
+    return changed
+
+
 def _legacy_default(node: dict, manifest: dict) -> bool:
     """Remove only the exact published vendor node (never a user-edited one)."""
     if (node.get("id") != manifest["id"] or
@@ -216,6 +267,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     by_id = {n.get("id"): n for n in current if isinstance(n, dict)}
     updated_functions = update_stock_functions(by_id, packaged_by_id)
     updated_bip = update_stock_bip(by_id, packaged_by_id)
+    updated_bip_geo = update_stock_bip_geo(by_id, packaged_by_id)
 
     # A retired vendor file must not be reimported indefinitely: migrate away
     # its stock nodes, including its Debug, Inject and HTML page. A renamed
@@ -243,7 +295,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
 
     new_current = [n for n in current if not isinstance(n,dict)
                    or n.get("id") not in matching]
-    changed = bool(updated_functions or updated_bip or matching)
+    changed = bool(updated_functions or updated_bip or updated_bip_geo or matching)
 
     if matching:
         for node in new_current:
@@ -316,7 +368,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         tmp.unlink(missing_ok=True)
     print(f"[INFO] Node-RED cleanup: removed {len(matching)} legacy nodes, "
           f"added {len(additions)}, migrated {updated_functions} stock functions, "
-          f"upgraded {updated_bip} BIP nodes; "
+          f"upgraded {updated_bip} old BIP, {updated_bip_geo} geo nodes; "
           f"{before_count} -> {len(new_current)} nodes; backup {backup.name}")
     return len(additions)
 
