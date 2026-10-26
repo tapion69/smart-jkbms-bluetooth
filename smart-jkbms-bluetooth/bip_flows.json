@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "JK-BMS - BIP",
     "disabled": false,
-    "info": "Voluntary anonymous installation count: stable UUID, app version, module and BIP type. No BMS MAC, data, geolocation or IP lookups. Separate from BLE/MQTT."
+    "info": "BIP based on the Finance flow: daily/startup trigger, consent, environment, Google POST fixed URL, GET redirect response and explicit created/updated confirmation. No MAC, BMS telemetry or IP geolocation."
   },
   {
     "id": "jkbms_bip_inject_0301",
@@ -23,7 +23,7 @@
     "topic": "",
     "payload": "",
     "payloadType": "date",
-    "x": 170,
+    "x": 165,
     "y": 100,
     "wires": [
       [
@@ -35,8 +35,8 @@
     "id": "jkbms_bip_prepare_0301",
     "type": "function",
     "z": "jkbms_bip_tab_0301",
-    "name": "Check BIP consent",
-    "func": "// Optional heartbeat for installation counting, not battery monitoring.\nif (String(env.get(\"SEND_BIP\") || \"false\").toLowerCase() !== \"true\") {\n  node.status({fill:\"grey\",shape:\"ring\",text:\"BIP disabled\"});\n  return null;\n}\nconst id=String(env.get(\"SMART_JKBMS_INSTALL_ID\")||\"\").trim();\nconst url=String(env.get(\"SMART_JKBMS_BIP_ENDPOINT\")||\"\").trim();\nconst version=String(env.get(\"SMART_JKBMS_VERSION\")||\"\").trim();\nif (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) || !url.startsWith(\"https://\")) {\n  node.status({fill:\"yellow\",shape:\"ring\",text:\"BIP missing configuration\"});\n  return null;\n}\nmsg.url=url;\nmsg.method=\"POST\";\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false;\nmsg.payload={module:\"jkbms\",install_id:id,bip:\"10\",version:version};\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Sending BIP v\"+version});\nreturn msg;",
+    "name": "BIP permitted?",
+    "func": "// Same default-on consent pattern as Smart Energy Finance.\nif (String(env.get(\"SEND_BIP\") || \"true\").toLowerCase() !== \"true\") {\n    node.status({fill:\"grey\",shape:\"ring\",text:\"BIP disabled by user\"});\n    return null;\n}\nconst installId=String(env.get(\"SMART_JKBMS_INSTALL_ID\") || \"\").trim();\nif (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(installId)) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP install ID unavailable\"});\n    node.warn(\"JK-BMS BIP: installation identifier is missing or invalid\");\n    return null;\n}\nmsg.bipInstallId=installId;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -46,7 +46,7 @@
     "y": 100,
     "wires": [
       [
-        "jkbms_bip_http_0301"
+        "jkbms_bip_environment_0303"
       ]
     ]
   },
@@ -54,39 +54,123 @@
     "id": "jkbms_bip_http_0301",
     "type": "http request",
     "z": "jkbms_bip_tab_0301",
-    "name": "Google Apps Script (BIP)",
-    "method": "use",
+    "name": "POST Google JK-BMS",
+    "method": "POST",
     "ret": "txt",
     "paytoqs": "ignore",
-    "url": "",
+    "url": "https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec",
     "tls": "",
     "persist": false,
     "proxy": "",
     "authType": "",
     "headers": [],
-    "x": 630,
+    "x": 1035,
     "y": 100,
     "wires": [
       [
-        "jkbms_bip_report_0301"
+        "jkbms_bip_redirect_0303"
       ]
-    ]
+    ],
+    "senderr": false
   },
   {
     "id": "jkbms_bip_report_0301",
     "type": "function",
     "z": "jkbms_bip_tab_0301",
     "name": "BIP result",
-    "func": "const http=Number(msg.statusCode)||0;\nnode.status({fill:http>=200&&http<400?\"green\":\"yellow\",shape:\"dot\",text:\"BIP HTTP \"+http});\nreturn null;",
+    "func": "// Do not report HTTP 302 as success: Google may return an error JSON.\nconst http=Number(msg.statusCode) || 0;\nlet data=msg.payload;\nif (typeof data === \"string\") {\n    try { data=JSON.parse(data); }\n    catch (_) { data=null; }\n}\nconst ok=http===200 && data && data.success===true &&\n    String(data.module || \"\").toLowerCase()===\"jkbms\" &&\n    [\"created\",\"updated\"].includes(String(data.status || \"\"));\nconst status=ok ? String(data.status) : \"not confirmed\";\nconst reason=(data && data.error) ? String(data.error).slice(0,160) :\n    (msg.bipError || (\"HTTP \"+http));\nnode.status({fill:ok?\"green\":\"red\",shape:ok?\"dot\":\"ring\",\n    text:ok?\"Google JK-BMS \"+status:\"BIP \"+reason});\nif (!ok) node.warn(\"JK-BMS BIP not confirmed: \"+reason);\n// Send only a sanitized result to any user-attached Debug nodes.\nmsg.payload={success:!!ok, module:\"jkbms\", status, http_status:http,\n    reason:ok?\"\":reason};\ndelete msg.bipInstallId;\ndelete msg.googleQuery;\ndelete msg.headers;\ndelete msg.url;\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 850,
+    "x": 1780,
     "y": 100,
     "wires": [
       []
+    ]
+  },
+  {
+    "id": "jkbms_bip_environment_0303",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Analyse environnement",
+    "func": "// The add-on is built for Home Assistant OS; same BIP convention as Finance.\n// One installation ID counts an installation, regardless of its BMS count.\nmsg.telemetry={bipBase:1,environment:\"Home Assistant OS\"};\nnode.status({fill:\"blue\",shape:\"dot\",text:\"HAOS / free\"});\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 520,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_payload_0303"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_payload_0303",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Prépare Google JK-BMS",
+    "func": "// Finance-compatible collector payload, without battery or location details.\nconst version=String(env.get(\"SMART_JKBMS_VERSION\") || \"\").trim();\nif (!msg.bipInstallId || !version) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP ID/version missing\"});\n    return null;\n}\nmsg.payload={\n    module:\"jkbms\",\n    install_id:msg.bipInstallId,\n    bip:String((msg.telemetry||{}).bipBase || 1)+\"0\",\n    version:version,\n    country:\"\",region:\"\",city:\"\",lat:\"\",lon:\"\"\n};\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false; // Finance: never auto-repeat POST on redirect.\ndelete msg.url;\ndelete msg.method;\nnode.status({fill:\"blue\",shape:\"dot\",text:\"v\"+version+\" / BIP \"+msg.payload.bip});\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 775,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_http_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_redirect_0303",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Vérifier redirection Google",
+    "func": "// Apps Script ContentService normally returns 302/303 to a JSON GET endpoint.\n// Finance deliberately does NOT follow the redirect with another POST.\n// Follow it manually as GET, then read {success, status} from Google's JSON.\nconst status=Number(msg.statusCode)||0;\nif (status===302 || status===303) {\n    const headers=msg.headers||{};\n    const location=String(headers.location || headers.Location || \"\");\n    const match=/^https:\\/\\/script\\.googleusercontent\\.com\\/macros\\/echo\\?([A-Za-z0-9._~!$&'()*+,;=:%-]+)$/.exec(location);\n    if (!match) {\n        msg.bipError=\"Google redirect missing/invalid: confirm Apps Script deployment\";\n        return [null,msg];\n    }\n    msg.googleQuery=match[1];\n    msg.payload=\"\";\n    msg.headers={};\n    delete msg.method;\n    delete msg.url;\n    msg.followRedirects=true;\n    return [msg,null];\n}\nreturn [null,msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1260,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_follow_get_0303"
+      ],
+      [
+        "jkbms_bip_report_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_follow_get_0303",
+    "type": "http request",
+    "z": "jkbms_bip_tab_0301",
+    "name": "GET Google JSON (no POST replay)",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "https://script.googleusercontent.com/macros/echo?{{{googleQuery}}}",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1540,
+    "y": 70,
+    "wires": [
+      [
+        "jkbms_bip_report_0301"
+      ]
     ]
   }
 ]
