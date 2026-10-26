@@ -33,14 +33,6 @@ export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
 export SMART_JKBMS_INSTALL_ID="$(/opt/venv/bin/python /addon/ble/installation_id.py)"
 export SMART_JKBMS_VERSION="0.3.5"
 export SEND_BIP="$(jq -r '(.send_bip // true) | if . == true then "true" else "false" end' "$OPTIONS")"
-export BIP_GEOLOCATION="$(jq -r '(.bip_geolocation // true) | if . == true then "true" else "false" end' "$OPTIONS")"
-export SMART_JKBMS_BIP_ENDPOINT="$(jq -r '.bip_endpoint // ""' "$OPTIONS")"
-# Backward compatibility: versions with an empty BIP endpoint now use the
-# maintainer's shared multi-module collector; send_bip=false always overrides.
-if [[ -z "$SMART_JKBMS_BIP_ENDPOINT" ]]; then
-  export SMART_JKBMS_BIP_ENDPOINT="https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec"
-fi
-
 NR_PID=""
 BLE_PID=""
 SHUTTING_DOWN=false
