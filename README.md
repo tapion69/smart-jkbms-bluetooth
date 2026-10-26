@@ -73,8 +73,8 @@ mqtt_port: 1883
 mqtt_username: "your-mqtt-username"
 mqtt_password: "your-mqtt-password"
 allow_parameter_changes: false
-send_bip: false
-bip_endpoint: "" # optional Google Apps Script /exec URL
+send_bip: true
+bip_endpoint: "https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec"
 ```
 
 Replace example MAC addresses and MQTT credentials with your own. Never share passwords, full configuration backups, internal IDs or private logs in public bug reports.
@@ -98,8 +98,8 @@ Replace example MAC addresses and MQTT credentials with your own. Never share pa
 | `mqtt_discovery_prefix` | Usually `homeassistant`. |
 | `allow_parameter_changes` | Master safety switch for writing BMS settings. **Default: `false`**. |
 | `debug_mode` | Optional development diagnostics. |
-| `send_bip` | Opt in to a startup and daily anonymous BIP. Default `false`, so nothing is transmitted unless you enable it. |
-| `bip_endpoint` | The Google Apps Script Web App `/exec` HTTPS URL for your authorized installation counter. Empty by default; the BIP does not send without it. |
+| `send_bip` | Sends an anonymous installation BIP at startup and daily; **enabled by default**. Users can opt out by setting `false`. |
+| `bip_endpoint` | HTTPS `/exec` URL for the shared multi-module Google Apps Script collector, preconfigured with the maintainer's existing endpoint. |
 
 The former `allow_temperature_control` name was misleading: it controlled all JK02 parameter writes, not only temperature. The master write option has been renamed to `allow_parameter_changes`. JK02 read-only information and settings requests remain necessary for monitoring and readback and are performed automatically.
 
@@ -132,22 +132,22 @@ When reporting an issue, please include the add-on version, Home Assistant versi
 
 The add-on includes a separate Node-RED **JK-BMS - BIP** flow based on the same Google Apps Script installation counter design as Smart Energy Finance. It does not affect the BLE, decoding or MQTT flows.
 
-**Disabled by default.** To enable anonymous installation counting, the collector owner must first publish the updated Google Apps Script, then set:
+**Enabled by default.** Installation counting is optional and can be switched off at any time:
 ```yaml
-send_bip: true
-bip_endpoint: "https://script.google.com/macros/s/YOUR_DEPLOYMENT/exec"
+send_bip: false
 ```
+The maintainer's Google Apps Script collector URL is preconfigured. The collector owner must deploy the updated multi-module script so it recognizes `jkbms`. The flow will keep working as a no-op if you disable `send_bip`.
 The add-on sends one BIP **15 seconds after Node-RED starts and daily at 15:00 (server/Node-RED local time)**. It transmits only:
 - `module: "jkbms"` — count the correct module in a dedicated `JK-BMS` spreadsheet tab
 - `install_id` — randomly generated UUID v4, stored locally at `/data/smart_jkbms_install_id`
 - `bip: "10"` — HA environment, free version (same convention as existing Finance reporting)
 - `version` — installed add-on version
 
-No battery telemetry, BMS Bluetooth addresses, serial numbers, names, location lookup, latitude, longitude or MQTT credentials are added to the request. As with all HTTPS requests, the destination's web infrastructure may process connection metadata such as your public IP address. You can disable transmission at any time with `send_bip: false`, and the install ID remains unchanged if you later opt back in.
+No battery telemetry, BMS Bluetooth addresses, serial numbers, names, location lookup, latitude, longitude or MQTT credentials are added to the request. As with all HTTPS requests, the destination's web infrastructure may process connection metadata such as your public IP address. You can disable transmission at any time with `send_bip: false`, and the install ID remains unchanged if you later opt back in. Existing Home Assistant installations that previously saved `send_bip: false` keep that setting after upgrading; switch it on manually if desired.
 
 Each installation gets **one row**; startup/daily reports update `last_seen` and version. Adding a third, fourth or fifth BMS does **not** create another installation. Reinstalling after deleting the add-on's persistent data may generate a new identifier.
 
-**Collector setup:** Use the updated multi-module Apps Script that maps `jkbms` to an independent `JK-BMS` tab, then deploy a new Web App version before enabling BIP. The full deployment URL is intentionally not embedded in the public add-on. This also avoids accidentally sending test data to another person's spreadsheet. The counter is informational and has no bearing on Home Assistant functionality.
+**Collector setup:** The project's existing multi-module Google Apps Script endpoint is the default destination. The maintainer must replace the old script with the updated code and redeploy the existing Web App version. The updated script automatically creates the `JK-BMS` tab and its headers on the first valid request when absent; no manual spreadsheet tab creation is needed. The existing Voltronic and Finance sheets remain unchanged. The counter is informational and has no bearing on Home Assistant functionality.
 
 ## Support this free project
 
