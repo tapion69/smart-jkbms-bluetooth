@@ -25,13 +25,13 @@ configuration:
     description: Off by default. Both this option and the per-BMS Home Assistant permission switch must be on to write settings; otherwise read-only monitoring continues.
   send_bip:
     name: Anonymous installation BIP (under development)
-    description: Opt in to an anonymous heartbeat on startup and once per day. Sends install ID, module, BIP code and add-on version only. Disabled by default; requires a collector URL.
+    description: Enabled by default. Sends a startup and daily installation heartbeat (random installation ID, module, BIP code and version). Set to false to opt out.
   adapter_reset_on_start:
     name: Reset Bluetooth controller on startup
     description: Off by default. Disconnects all devices using this controller. Select hci0/hci1/hci2/hci3 explicitly, not auto.
   bip_endpoint:
     name: Installation counter HTTPS URL
-    description: Google Apps Script Web App /exec URL. Leave empty to disable BIP transport. Configure only a collector you trust.
+    description: Google Apps Script Web App /exec URL. Maintainer's collector is preconfigured. Set send_bip to false to disable reports.
   debug_mode:
     name: Detailed diagnostics
     description: Reserved for initial troubleshooting.
