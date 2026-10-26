@@ -27,9 +27,9 @@ class BipFlowMigrationTests(unittest.TestCase):
             installed.write_text(json.dumps(original), encoding="utf-8")
             added = merge_mod.merge(installed, *base, bip)
             merged = json.loads(installed.read_text(encoding="utf-8"))
-            self.assertEqual(added, 13)
+            self.assertEqual(added, 14)
             self.assertIn(user, merged)
-            self.assertEqual(len(merged), len(original) + 13)
+            self.assertEqual(len(merged), len(original) + 14)
             self.assertEqual(merge_mod.merge(installed, *base, bip), 0)
             self.assertEqual(len(json.loads(installed.read_text())), len(merged))
             self.assertTrue(list(Path(directory).glob("flows.json.*.bak")))
@@ -127,6 +127,51 @@ class BipFlowMigrationTests(unittest.TestCase):
             merge_mod.merge(installed,*packages)
             result={n["id"]:n for n in json.loads(installed.read_text())}
             self.assertEqual(result["jkbms_bip_payload_0303"]["func"],fn["func"])
+
+    def test_v034_timeout_migration_cleans_geo_http_without_user_data_loss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed=Path(directory) / "flows.json"
+            old=json.loads((Path(__file__).resolve().parent / "fixtures"
+                             / "bip_v034.json").read_text(encoding="utf-8"))
+            by_id={n["id"]:n for n in old}
+            by_id["jkbms_bip_geo_http_0304"]["wires"][0].append("custom_geo_debug")
+            old.append({"id":"custom_geo_debug","type":"debug",
+                        "z":"jkbms_bip_tab_0301","name":"User geo output debug",
+                        "wires":[]})
+            installed.write_text(json.dumps(old),encoding="utf-8")
+            packages=[ROOT / name for name in
+                      ("flows.json","decoder_flows.json","mqtt_flows.json",
+                       "bip_flows.json")]
+            merge_mod.merge(installed,*packages)
+            current=json.loads(installed.read_text(encoding="utf-8"))
+            result={n["id"]:n for n in current}
+            self.assertIn("jkbms_bip_geo_verify_0305", result)
+            self.assertEqual(result["jkbms_bip_geo_http_0304"]["wires"][0],
+                             ["jkbms_bip_geo_verify_0305","custom_geo_debug"])
+            self.assertEqual(result["jkbms_bip_geo_fallback_0304"]["wires"][0],
+                             ["jkbms_bip_geo_verify_0305"])
+            self.assertIn("msg.requestTimeout=5500",
+                          result["jkbms_bip_geo_gate_0304"]["func"])
+            self.assertIn("statusCode",result["jkbms_bip_geo_verify_0305"]["func"])
+            self.assertIn("custom_geo_debug",result)
+            self.assertEqual(merge_mod.merge(installed,*packages),0)
+            self.assertEqual(current,json.loads(installed.read_text()))
+            self.assertTrue(list(Path(directory).glob("flows.json.*.bak")))
+
+    def test_modified_v034_geo_gate_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed=Path(directory) / "flows.json"
+            nodes=json.loads((Path(__file__).resolve().parent / "fixtures"
+                             / "bip_v034.json").read_text(encoding="utf-8"))
+            gate=next(x for x in nodes if x["id"]=="jkbms_bip_geo_gate_0304")
+            gate["func"]="return [msg,null]; // custom geo consent"
+            installed.write_text(json.dumps(nodes),encoding="utf-8")
+            packages=[ROOT / name for name in
+                      ("flows.json","decoder_flows.json","mqtt_flows.json",
+                       "bip_flows.json")]
+            merge_mod.merge(installed,*packages)
+            result={n["id"]:n for n in json.loads(installed.read_text())}
+            self.assertEqual(result["jkbms_bip_geo_gate_0304"]["func"],gate["func"])
 
     def test_separate_bip_tab_and_no_ble_pipeline_wires(self):
         nodes = json.loads((ROOT / "bip_flows.json").read_text(encoding="utf-8"))
