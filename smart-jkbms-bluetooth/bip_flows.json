@@ -178,7 +178,7 @@
     "type": "function",
     "z": "jkbms_bip_tab_0301",
     "name": "Géolocalisation autorisée ?",
-    "func": "// Independent opt-out for approximate IP-based BIP location.\nif (String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\") {\n    node.status({fill:\"blue\",shape:\"dot\",text:\"IP location enabled\"});\n    return [msg,null];\n}\nmsg.payload={success:false};\nnode.status({fill:\"grey\",shape:\"ring\",text:\"IP location disabled\"});\nreturn [null,msg];",
+    "func": "// Independent opt-out for approximate IP-based BIP location.\nif (String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\") {\n    msg.requestTimeout=5500; // HTTP node-level timeout (milliseconds)\n    node.status({fill:\"blue\",shape:\"dot\",text:\"IP location enabled\"});\n    return [msg,null];\n}\nmsg.payload={success:false};\nnode.status({fill:\"grey\",shape:\"ring\",text:\"IP location disabled\"});\nreturn [null,msg];",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
@@ -215,7 +215,7 @@
     "y": 80,
     "wires": [
       [
-        "jkbms_bip_payload_0303"
+        "jkbms_bip_geo_verify_0305"
       ]
     ]
   },
@@ -249,6 +249,25 @@
     "libs": [],
     "x": 1270,
     "y": 170,
+    "wires": [
+      [
+        "jkbms_bip_geo_verify_0305"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_geo_verify_0305",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Check GEO reply / continue BIP",
+    "func": "// ipwho.is timeouts are often delivered as ordinary messages:\n//   statusCode: \"ETIMEDOUT\", responseUrl: \"https://ipwho.is/\"\n// A Catch node alone does not handle these. Never forward stale HTTP\n// metadata into the separate Google Apps Script POST.\n// Some versions of Node-RED emit both an output and a Catch message.\n// Deduplicate on original _msgid to avoid two installation BIPs.\nconst now=Date.now();\nlet handled=context.get(\"jkbms_geo_recent\") || {};\nfor (const key of Object.keys(handled)) {\n    if (now-handled[key]>120000) delete handled[key];\n}\nconst key=String(msg._msgid || \"\");\nif (key && handled[key]) return null;\nif (key) handled[key]=now;\ncontext.set(\"jkbms_geo_recent\",handled);\n\nconst status=Number(msg.statusCode);\nconst body=msg.payload && typeof msg.payload===\"object\" ? msg.payload : {};\nconst valid=status===200 && !msg.error && body.success===true;\nif (!valid) {\n    const reason=String(msg.error?.message || msg.statusCode || \"no response\").slice(0,80);\n    node.status({fill:\"yellow\",shape:\"ring\",text:\"Geo unavailable (\"+reason+\"); BIP continues\"});\n    msg.payload={success:false};\n} else {\n    node.status({fill:\"green\",shape:\"dot\",text:\"Geo \"+String(body.city||body.country||\"ok\").slice(0,45)});\n}\n// Both successful and failed location attempts must arrive at Google\n// with a clean message (the next HTTP request has its own statusCode).\nfor (const field of [\n    \"statusCode\",\"responseUrl\",\"redirectList\",\"retry\",\"requestTimeout\",\n    \"headers\",\"error\",\"url\",\"method\",\"followRedirects\",\"responseTime\",\n    \"responseDuration\",\"socketError\"\n]) delete msg[field];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1250,
+    "y": 80,
     "wires": [
       [
         "jkbms_bip_payload_0303"
