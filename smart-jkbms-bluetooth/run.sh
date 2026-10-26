@@ -29,11 +29,16 @@ export BLE_BRIDGE_ENDPOINT="http://127.0.0.1:1895/internal/ble/events"
 export BLE_OPTIONS_FILE="$OPTIONS"
 export BLE_BMS_ADDRESSES="$(jq -r '.bms_addresses // ""' "$OPTIONS")"
 export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
-# Persistent anonymous UUID prepared locally. No BIP HTTP requests are made yet.
+# Persistent anonymous UUID used by the opt-out BIP, never derived from the BMS.
 export SMART_JKBMS_INSTALL_ID="$(/opt/venv/bin/python /addon/ble/installation_id.py)"
 export SMART_JKBMS_VERSION="0.3.1"
-export SEND_BIP="$(jq -r '(.send_bip // false) | if . == true then "true" else "false" end' "$OPTIONS")"
+export SEND_BIP="$(jq -r '(.send_bip // true) | if . == true then "true" else "false" end' "$OPTIONS")"
 export SMART_JKBMS_BIP_ENDPOINT="$(jq -r '.bip_endpoint // ""' "$OPTIONS")"
+# Backward compatibility: versions with an empty BIP endpoint now use the
+# maintainer's shared multi-module collector; send_bip=false always overrides.
+if [[ -z "$SMART_JKBMS_BIP_ENDPOINT" ]]; then
+  export SMART_JKBMS_BIP_ENDPOINT="https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec"
+fi
 
 NR_PID=""
 BLE_PID=""
