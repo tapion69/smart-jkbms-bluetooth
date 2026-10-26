@@ -235,6 +235,75 @@ def update_stock_bip_geo(current_by_id: dict, packaged_by_id: dict) -> int:
     return changed
 
 
+STOCK_GEO_GATE_034 = (347, "e8b2ecb362e5338b")
+STOCK_GEO_FALLBACK_034 = (204, "1991e5b23367eacf")
+
+
+def upgrade_stock_geo_timeout(current: dict, packaged: dict) -> int:
+    """Repair known v0.3.4 geo HTTP timeout handling.
+
+    Migrate only exact stock Function nodes and original stock HTTP
+    wiring; preserve user edits and extra user Debug links.
+    """
+    changed = 0
+    gate_id="jkbms_bip_geo_gate_0304"
+    http_id="jkbms_bip_geo_http_0304"
+    fallback_id="jkbms_bip_geo_fallback_0304"
+    prepared_id="jkbms_bip_payload_0303"
+    verify_id="jkbms_bip_geo_verify_0305"
+
+    gate=current.get(gate_id)
+    desired=packaged.get(gate_id)
+    if isinstance(gate,dict) and isinstance(desired,dict):
+        code=gate.get("func")
+        if (gate.get("type")=="function" and
+            gate.get("name")=="Géolocalisation autorisée ?" and
+            isinstance(code,str) and
+            (len(code),legacy_fingerprint(code))==STOCK_GEO_GATE_034):
+            gate["func"]=desired["func"]
+            changed+=1
+        elif code!=desired.get("func"):
+            print("[WARN] Modified geo permission function preserved")
+
+    for node_id,expected_name in (
+        (http_id, "geoloc (ipwho.is)"),
+        (fallback_id, "Geo unavailable (continue BIP)")
+    ):
+        current_node=current.get(node_id)
+        desired=packaged.get(node_id)
+        if not isinstance(current_node,dict) or not isinstance(desired,dict):
+            continue
+        if (current_node.get("name")!=expected_name or
+            current_node.get("type")!=desired.get("type")):
+            continue
+        if node_id==http_id and (
+            current_node.get("method")!="GET" or
+            current_node.get("url")!="https://ipwho.is/"):
+            continue
+        if node_id==fallback_id:
+            code=current_node.get("func")
+            if (not isinstance(code,str) or
+                (len(code),legacy_fingerprint(code))!=STOCK_GEO_FALLBACK_034):
+                if code!=desired.get("func"):
+                    print("[WARN] Modified geo fallback function preserved")
+                continue
+        wires=current_node.get("wires")
+        if not (isinstance(wires,list) and wires and isinstance(wires[0],list)):
+            continue
+        if verify_id in wires[0] and prepared_id not in wires[0]:
+            continue
+        if prepared_id not in wires[0]:
+            print(f"[WARN] Custom geo wiring {node_id} preserved")
+            continue
+        extra=[x for x in wires[0] if x not in (prepared_id,verify_id)]
+        wires[0]=[verify_id]+extra
+        changed+=1
+    if changed:
+        print(f"[INFO] Updated {changed} stock JK-BMS geo nodes: "
+              "ETIMEDOUT now falls back to Google BIP without stale HTTP metadata")
+    return changed
+
+
 def _legacy_default(node: dict, manifest: dict) -> bool:
     """Remove only the exact published vendor node (never a user-edited one)."""
     if (node.get("id") != manifest["id"] or
@@ -275,6 +344,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     updated_functions = update_stock_functions(by_id, packaged_by_id)
     updated_bip = update_stock_bip(by_id, packaged_by_id)
     updated_bip_geo = update_stock_bip_geo(by_id, packaged_by_id)
+    updated_geo_timeout = upgrade_stock_geo_timeout(by_id, packaged_by_id)
 
     # A retired vendor file must not be reimported indefinitely: migrate away
     # its stock nodes, including its Debug, Inject and HTML page. A renamed
@@ -302,7 +372,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
 
     new_current = [n for n in current if not isinstance(n,dict)
                    or n.get("id") not in matching]
-    changed = bool(updated_functions or updated_bip or updated_bip_geo or matching)
+    changed = bool(updated_functions or updated_bip or updated_bip_geo or updated_geo_timeout or matching)
 
     if matching:
         for node in new_current:
@@ -375,7 +445,8 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
         tmp.unlink(missing_ok=True)
     print(f"[INFO] Node-RED cleanup: removed {len(matching)} legacy nodes, "
           f"added {len(additions)}, migrated {updated_functions} stock functions, "
-          f"upgraded {updated_bip} old BIP, {updated_bip_geo} geo nodes; "
+          f"upgraded {updated_bip} old BIP, {updated_bip_geo} geo, "
+          f"{updated_geo_timeout} timeout nodes; "
           f"{before_count} -> {len(new_current)} nodes; backup {backup.name}")
     return len(additions)
 
