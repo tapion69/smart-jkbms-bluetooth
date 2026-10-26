@@ -29,6 +29,9 @@ configuration:
   send_bip:
     name: Comptage anonyme des installations (en développement)
     description: Activé par défaut. Envoi au démarrage et une fois par jour d'un identifiant d'installation aléatoire, du module et de la version. Désactiver pour refuser l'envoi.
+  bip_geolocation:
+    name: Géolocalisation approximative des installations (IP)
+    description: Activée par défaut avec le BIP. Utilise ipwho.is pour récupérer pays, région, ville et coordonnées approximatives à partir de l'adresse IP publique. Désactivable indépendamment du BIP.
   bip_endpoint:
     name: Adresse HTTPS du collecteur BIP
     description: URL /exec de l'application Web Google Apps Script. Collecteur du projet préconfiguré. Désactiver send_bip pour arrêter les envois.
