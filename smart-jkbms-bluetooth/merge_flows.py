@@ -205,7 +205,9 @@ def update_stock_bip_geo(current_by_id: dict, packaged_by_id: dict) -> int:
         original = node.get("func")
         if node.get("type") != "function" or node.get("name") != name:
             continue
-        if original == desired.get("func"):
+        # Environment's official source is unchanged: the migration must
+        # still reroute its old direct edge through the new geo branch.
+        if original == desired.get("func") and node_id != analysis_id:
             continue
         if not isinstance(original, str) or (
                 len(original), legacy_fingerprint(original)) != (length, fp):
@@ -217,6 +219,11 @@ def update_stock_bip_geo(current_by_id: dict, packaged_by_id: dict) -> int:
             if not (isinstance(wires, list) and wires
                     and isinstance(wires[0], list)):
                 print("[WARN] Custom BIP environment wiring preserved")
+                continue
+            if geo_gate_id in wires[0] and old_next_id not in wires[0]:
+                continue
+            if old_next_id not in wires[0]:
+                print("[WARN] Custom BIP environment edges preserved")
                 continue
             extra = [target for target in wires[0]
                      if target not in (old_next_id, geo_gate_id)]
