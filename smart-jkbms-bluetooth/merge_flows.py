@@ -96,6 +96,87 @@ def update_stock_functions(
 
 
 
+# Official v0.3.1/0.3.2 BIP function fingerprints. We only migrate these
+# verified stock functions, leaving custom Node-RED functions untouched.
+STOCK_BIP_032 = {
+    "jkbms_bip_prepare_0301": ("Check BIP consent", 865, "f1f4b543da72cac6"),
+    "jkbms_bip_report_0301": ("BIP result", 142, "904ef0111c3716ed"),
+}
+
+
+def update_stock_bip(current_by_id: dict, packaged_by_id: dict) -> int:
+    """Replace only the original publisher's broken BIP nodes.
+
+    This also replaces the two stock edges but preserves any additional
+    user wiring such as a downstream Debug node. Compatible with repeated
+    upgrades; never rewire an edited/custom Function.
+    """
+    changed = 0
+    gate_id = "jkbms_bip_prepare_0301"
+    post_id = "jkbms_bip_http_0301"
+    result_id = "jkbms_bip_report_0301"
+    analysis_id = "jkbms_bip_environment_0303"
+    resolve_id = "jkbms_bip_redirect_0303"
+
+    for node_id in (gate_id, result_id):
+        node = current_by_id.get(node_id)
+        desired = packaged_by_id.get(node_id)
+        if not isinstance(node, dict) or not isinstance(desired, dict):
+            continue
+        if node.get("type") != "function":
+            continue
+        old_name, length, fingerprint = STOCK_BIP_032[node_id]
+        code = node.get("func")
+        is_stock = (node.get("name") == old_name and
+                    isinstance(code, str) and
+                    (len(code), legacy_fingerprint(code)) == (length, fingerprint))
+        if not is_stock:
+            if code != desired.get("func"):
+                print(f"[WARN] Custom JK-BMS BIP Function {node_id} preserved; "
+                      "review/update it manually to enable confirmed replies")
+            continue
+        if node_id == gate_id:
+            wires = node.get("wires")
+            if not (isinstance(wires, list) and wires
+                    and isinstance(wires[0], list)):
+                print("[WARN] Original BIP consent wiring differs; preserving node")
+                continue
+            # Move the original HTTP link after the new Prepare function.
+            before = list(wires[0])
+            wires[0] = [analysis_id] + [
+                target for target in before if target not in (analysis_id, post_id)
+            ]
+        node["name"] = desired["name"]
+        node["func"] = desired["func"]
+        changed += 1
+        print(f"[INFO] Upgraded stock JK-BMS BIP Function {node_id}")
+
+    http = current_by_id.get(post_id)
+    new_http = packaged_by_id.get(post_id)
+    if isinstance(http, dict) and isinstance(new_http, dict):
+        if (http.get("type") == "http request" and
+            http.get("name") == "Google Apps Script (BIP)" and
+            http.get("method") == "use" and http.get("url") == ""):
+            wires = http.get("wires")
+            if isinstance(wires, list) and wires and isinstance(wires[0], list):
+                before = list(wires[0])
+                http["wires"][0] = [resolve_id] + [
+                    target for target in before if target not in (result_id, resolve_id)
+                ]
+                http["name"] = new_http["name"]
+                http["url"] = new_http["url"]
+                http["method"] = new_http["method"]
+                http["ret"] = new_http["ret"]
+                changed += 1
+                print("[INFO] Upgraded stock JK-BMS BIP: fixed Google POST URL "
+                      "and explicit JSON redirect verification")
+            else:
+                print("[WARN] Modified original BIP POST wiring; preserving HTTP node")
+        elif http.get("url") != new_http.get("url"):
+            print("[WARN] Custom BIP HTTP URL preserved; verify collector settings")
+    return changed
+
+
 def _legacy_default(node: dict, manifest: dict) -> bool:
     """Remove only the exact published vendor node (never a user-edited one)."""
     if (node.get("id") != manifest["id"] or
@@ -134,6 +215,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     before_count=len(current)
     by_id = {n.get("id"): n for n in current if isinstance(n, dict)}
     updated_functions = update_stock_functions(by_id, packaged_by_id)
+    updated_bip = update_stock_bip(by_id, packaged_by_id)
 
     # A retired vendor file must not be reimported indefinitely: migrate away
     # its stock nodes, including its Debug, Inject and HTML page. A renamed
@@ -161,7 +243,7 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
 
     new_current = [n for n in current if not isinstance(n,dict)
                    or n.get("id") not in matching]
-    changed = bool(updated_functions or matching)
+    changed = bool(updated_functions or updated_bip or matching)
 
     if matching:
         for node in new_current:
@@ -233,7 +315,8 @@ def merge(installed: Path, packaged: Path, *extra_packages: Path) -> int:
     finally:
         tmp.unlink(missing_ok=True)
     print(f"[INFO] Node-RED cleanup: removed {len(matching)} legacy nodes, "
-          f"added {len(additions)}, migrated {updated_functions} stock functions; "
+          f"added {len(additions)}, migrated {updated_functions} stock functions, "
+          f"upgraded {updated_bip} BIP nodes; "
           f"{before_count} -> {len(new_current)} nodes; backup {backup.name}")
     return len(additions)
 
