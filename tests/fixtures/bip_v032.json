@@ -1,0 +1,92 @@
+[
+  {
+    "id": "jkbms_bip_tab_0301",
+    "type": "tab",
+    "label": "JK-BMS - BIP",
+    "disabled": false,
+    "info": "Voluntary anonymous installation count: stable UUID, app version, module and BIP type. No BMS MAC, data, geolocation or IP lookups. Separate from BLE/MQTT."
+  },
+  {
+    "id": "jkbms_bip_inject_0301",
+    "type": "inject",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Startup + daily BIP",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "0 15 * * *",
+    "once": true,
+    "onceDelay": 15,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_prepare_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_prepare_0301",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Check BIP consent",
+    "func": "// Optional heartbeat for installation counting, not battery monitoring.\nif (String(env.get(\"SEND_BIP\") || \"false\").toLowerCase() !== \"true\") {\n  node.status({fill:\"grey\",shape:\"ring\",text:\"BIP disabled\"});\n  return null;\n}\nconst id=String(env.get(\"SMART_JKBMS_INSTALL_ID\")||\"\").trim();\nconst url=String(env.get(\"SMART_JKBMS_BIP_ENDPOINT\")||\"\").trim();\nconst version=String(env.get(\"SMART_JKBMS_VERSION\")||\"\").trim();\nif (!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) || !url.startsWith(\"https://\")) {\n  node.status({fill:\"yellow\",shape:\"ring\",text:\"BIP missing configuration\"});\n  return null;\n}\nmsg.url=url;\nmsg.method=\"POST\";\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false;\nmsg.payload={module:\"jkbms\",install_id:id,bip:\"10\",version:version};\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Sending BIP v\"+version});\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 385,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_http_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_http_0301",
+    "type": "http request",
+    "z": "jkbms_bip_tab_0301",
+    "name": "Google Apps Script (BIP)",
+    "method": "use",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "authType": "",
+    "headers": [],
+    "x": 630,
+    "y": 100,
+    "wires": [
+      [
+        "jkbms_bip_report_0301"
+      ]
+    ]
+  },
+  {
+    "id": "jkbms_bip_report_0301",
+    "type": "function",
+    "z": "jkbms_bip_tab_0301",
+    "name": "BIP result",
+    "func": "const http=Number(msg.statusCode)||0;\nnode.status({fill:http>=200&&http<400?\"green\":\"yellow\",shape:\"dot\",text:\"BIP HTTP \"+http});\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 850,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  }
+]
