@@ -35,8 +35,6 @@ options:
   mqtt_discovery_prefix: homeassistant
   debug_mode: true
   send_bip: true
-  bip_geolocation: true
-  bip_endpoint: "https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec"
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
   scan_interval_seconds: int(20,300)
@@ -56,5 +54,3 @@ schema:
   mqtt_discovery_prefix: str
   debug_mode: bool
   send_bip: bool
-  bip_geolocation: bool
-  bip_endpoint: str?
