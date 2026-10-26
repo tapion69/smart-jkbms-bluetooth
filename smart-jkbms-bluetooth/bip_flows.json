@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "JK-BMS - BIP",
     "disabled": false,
-    "info": "Finance-style BIP: default-on heartbeat, optional ipwho.is IP geolocation (country/region/city/approximate lat/lon), registered through Apps Script. No BMS measurements/MAC/serial sent. Geo service errors fall back to plain heartbeat."
+    "info": "BIP counts installations while enabled by send_bip. An IP-based approximate location is included for the installation map when available. No battery measurements, MAC or serial numbers. Location lookup failures do not block BIP."
   },
   {
     "id": "jkbms_bip_inject_0301",
@@ -114,7 +114,7 @@
     "type": "function",
     "z": "jkbms_bip_tab_0301",
     "name": "Prépare Google JK-BMS",
-    "func": "// Finance-style optional IP geolocation: this lookup is only performed\n// after BIP permission and can be disabled separately in add-on settings.\nconst version=String(env.get(\"SMART_JKBMS_VERSION\") || \"\").trim();\nif (!msg.bipInstallId || !version) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP ID/version missing\"});\n    return null;\n}\nconst geo=msg.payload && typeof msg.payload===\"object\" ? msg.payload : {};\nconst geoAllowed=String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\";\nconst found=geoAllowed && geo.success===true;\nconst clean=(s)=>typeof s===\"string\" ? s.trim().slice(0,120) : \"\";\nconst coord=(v,min,max)=>v!==\"\" && v!==null && v!==undefined &&\n    Number.isFinite(Number(v)) && Number(v)>=min && Number(v)<=max\n    ? Number(v) : \"\";\nconst country=found ? clean(geo.country) : \"\";\nconst region=found ? clean(geo.region) : \"\";\nconst city=found ? clean(geo.city) : \"\";\nconst lat=found ? coord(geo.latitude,-90,90) : \"\";\nconst lon=found ? coord(geo.longitude,-180,180) : \"\";\nmsg.payload={\n    module:\"jkbms\",\n    install_id:msg.bipInstallId,\n    bip:String((msg.telemetry||{}).bipBase || 1)+\"0\",\n    version:version,\n    country,region,city,lat,lon\n};\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false;\ndelete msg.url;\ndelete msg.method;\n// No raw geolocation response, network IP, or BMS data passed to Google.\nconst label=found ? (city || country || \"location available\") : \"location unavailable\";\nnode.status({fill:found?\"green\":\"yellow\",shape:\"dot\",\n    text:\"v\"+version+\" | BIP \"+msg.payload.bip+\" | \"+label});\nreturn msg;",
+    "func": "// BIP consent is controlled solely by send_bip. A failed IP lookup\n// leaves location fields empty but still sends the installation count.\nconst version=String(env.get(\"SMART_JKBMS_VERSION\") || \"\").trim();\nif (!msg.bipInstallId || !version) {\n    node.status({fill:\"red\",shape:\"ring\",text:\"BIP ID/version missing\"});\n    return null;\n}\nconst geo=msg.payload && typeof msg.payload===\"object\" ? msg.payload : {};\nconst found=geo.success===true;\nconst clean=(s)=>typeof s===\"string\" ? s.trim().slice(0,120) : \"\";\nconst coord=(v,min,max)=>v!==\"\" && v!==null && v!==undefined &&\n    Number.isFinite(Number(v)) && Number(v)>=min && Number(v)<=max\n    ? Number(v) : \"\";\nconst country=found ? clean(geo.country) : \"\";\nconst region=found ? clean(geo.region) : \"\";\nconst city=found ? clean(geo.city) : \"\";\nconst lat=found ? coord(geo.latitude,-90,90) : \"\";\nconst lon=found ? coord(geo.longitude,-180,180) : \"\";\nmsg.payload={\n    module:\"jkbms\",\n    install_id:msg.bipInstallId,\n    bip:String((msg.telemetry||{}).bipBase || 1)+\"0\",\n    version:version,\n    country,region,city,lat,lon\n};\nmsg.headers={\"Content-Type\":\"application/json\"};\nmsg.followRedirects=false;\ndelete msg.url;\ndelete msg.method;\n// No raw geolocation response, network IP, or BMS data passed to Google.\nconst label=found ? (city || country || \"location available\") : \"location unavailable\";\nnode.status({fill:found?\"green\":\"yellow\",shape:\"dot\",\n    text:\"v\"+version+\" | BIP \"+msg.payload.bip+\" | \"+label});\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -177,8 +177,8 @@
     "id": "jkbms_bip_geo_gate_0304",
     "type": "function",
     "z": "jkbms_bip_tab_0301",
-    "name": "Géolocalisation autorisée ?",
-    "func": "// Independent opt-out for approximate IP-based BIP location.\nif (String(env.get(\"BIP_GEOLOCATION\")||\"true\").toLowerCase()===\"true\") {\n    msg.requestTimeout=5500; // HTTP node-level timeout (milliseconds)\n    node.status({fill:\"blue\",shape:\"dot\",text:\"IP location enabled\"});\n    return [msg,null];\n}\nmsg.payload={success:false};\nnode.status({fill:\"grey\",shape:\"ring\",text:\"IP location disabled\"});\nreturn [null,msg];",
+    "name": "Localisation BIP",
+    "func": "// One switch only: the upstream BIP consent node checks SEND_BIP.\n// When the BIP is enabled, try IP-based approximate location for the map.\n// Failure is handled downstream and never blocks the installation counter.\nmsg.requestTimeout=5500;\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Location lookup\"});\nreturn [msg,null];",
     "outputs": 2,
     "noerr": 0,
     "initialize": "",
