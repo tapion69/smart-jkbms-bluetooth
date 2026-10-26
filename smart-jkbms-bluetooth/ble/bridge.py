@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.1.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.2.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -660,7 +660,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.1", note="JK02_public_beta_BIP_reporting"
+        "bridge_start", version="0.3.2", note="JK02_addon_native_icon_logo"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
