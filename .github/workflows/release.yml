@@ -1,0 +1,57 @@
+name: Publish JK-BMS add-on release
+on:
+  push:
+    branches: [main]
+    paths: [smart-jkbms-bluetooth/config.yaml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required Home Assistant graphics
+        shell: bash
+        run: |
+          test -s smart-jkbms-bluetooth/icon.png
+          test -s smart-jkbms-bluetooth/logo.png
+          file smart-jkbms-bluetooth/icon.png smart-jkbms-bluetooth/logo.png
+          python - <<'PY'
+          from pathlib import Path
+          import struct
+          for name, expected in [("icon.png", (128, 128)), ("logo.png", (250, 100))]:
+              data=(Path("smart-jkbms-bluetooth") / name).read_bytes()
+              assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{name}: not a PNG"
+              actual=struct.unpack(">II", data[16:24])
+              assert actual==expected, f"{name}: {actual} != {expected}"
+              print(name, actual)
+          PY
+      - name: Prepare version and release description
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version: "\([^"]*\)"/\1/p' smart-jkbms-bluetooth/config.yaml | head -1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Publish prerelease (idempotent)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          GITHUB_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; not overwriting"
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Smart JK-BMS Bluetooth $RELEASE_VERSION (Development)" \
+            --notes-file smart-jkbms-bluetooth/CHANGELOG.md \
+            --prerelease
