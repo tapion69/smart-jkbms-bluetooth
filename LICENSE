@@ -1,0 +1,131 @@
+SMART JK-BMS BLUETOOTH
+PERSONAL USE & RESTRICTED REDISTRIBUTION LICENSE
+Version 1.0 — 26 October 2026
+
+Copyright (c) 2026 Tapion69.
+All rights reserved except as expressly permitted below.
+
+Official project: https://github.com/tapion69/smart-jkbms-bluetooth
+
+IMPORTANT: THIS IS A CUSTOM SOURCE-AVAILABLE LICENSE, NOT AN
+OPEN-SOURCE LICENSE (AS DEFINED BY THE OPEN SOURCE INITIATIVE).
+"Free to use" does not mean "free to redistribute".
+
+1. SCOPE AND OWNERSHIP
+
+This license applies to original materials made available in the official
+Smart JK-BMS Bluetooth repository by the copyright holder, including
+original Python code, Node-RED flows, add-on files, dashboards,
+documentation, and project artwork ("Software").
+
+The copyright holder retains ownership of the Software. Publication on
+GitHub, access to source code, or the ability to download or fork the
+repository does not, by itself, transfer ownership or grant additional
+rights beyond those stated here and any mandatory rights.
+
+This license covers only materials the copyright holder has the legal
+right to license. Third-party components, dependencies, existing code
+with separate licenses, and contributions owned by other authors remain
+subject to their own applicable licenses and copyright notices.
+
+2. FREE PERMITTED USE — NO APPROVAL OR LICENSE KEY REQUIRED
+
+You may, without charge or prior approval:
+
+(a) Download and install the Software for your own personal,
+    educational, testing, or other non-commercial use.
+(b) Run the Software on one or more of your own Home Assistant systems,
+    including installations monitoring multiple JK-BMS devices.
+(c) Make reasonable local backup copies for your own use.
+(d) Inspect the source and make private modifications for your own
+    non-commercial installations, without publishing or distributing
+    those modified copies.
+(e) Share the OFFICIAL GitHub repository link, describe the project,
+    post screenshots, and report issues or propose improvements through
+    the official repository.
+
+These permissions are non-exclusive, non-transferable, and subject to
+retaining existing copyright and license notices in any local copies.
+
+3. RESTRICTED ACTIVITIES — PRIOR WRITTEN PERMISSION REQUIRED
+
+Except where applicable law expressly permits otherwise, you must not,
+without prior written permission from the copyright holder:
+
+(a) Redistribute, republish, mirror, upload, or publicly share the
+    Software, substantially similar copies of its source code, or
+    modified versions as a separate downloadable project or product.
+(b) Repackage, rebrand, or present the Software or its original
+    Node-RED flows as your own project.
+(c) Sell, sublicense, rent, monetize, or bundle the Software with
+    hardware, paid software, paid services, or a commercial offering.
+(d) Integrate or reuse the Software's original code or flows in a
+    separately distributed add-on, integration, application, or service.
+(e) Offer commercial installation, support, or redistribution services
+    using the Software without permission.
+(f) Remove, conceal, or misrepresent authorship, copyright notices,
+    license notices, or origin information.
+
+A public GitHub repository may be viewed and forked within the rights
+granted by GitHub's Terms of Service. Those platform rights do not
+constitute permission to relicense, rebrand, sell, or redistribute the
+Software outside the rights expressly granted here.
+
+You may freely direct other people to the official repository instead
+of redistributing copies.
+
+4. MODIFICATIONS, CONTRIBUTIONS, AND THIRD-PARTY RIGHTS
+
+Private non-commercial adaptations are permitted by Section 2.
+Publishing derivative versions, including modified Node-RED flows,
+requires prior written permission.
+
+Submitting an issue or pull request does not automatically transfer
+ownership of a contributor's original work to the project owner.
+Contributors should submit only material they have the right to share;
+additional contributor terms may be needed before contributions can be
+incorporated and redistributed.
+
+This license does not supersede or remove any permissions or
+obligations under third-party open-source licenses (including the
+licenses of Node-RED, Bleak, Paho MQTT and other dependencies).
+Those components retain their original terms.
+
+Nothing in this license restricts the development of an independently
+created project that does not copy protected expression from the
+Software, or any use expressly allowed under applicable law.
+
+5. REQUESTING COMMERCIAL OR REDISTRIBUTION PERMISSION
+
+Contact the project owner through the official repository:
+
+https://github.com/tapion69/smart-jkbms-bluetooth
+
+Unless expressly agreed in writing, no permission for commercial use,
+republication, redistribution, or sublicensing is granted.
+
+6. NO WARRANTY; LIMITATION OF LIABILITY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
+
+THE COPYRIGHT HOLDER MAKES NO GUARANTEE OF COMPATIBILITY,
+RELIABILITY, SAFETY, OR FITNESS FOR A PARTICULAR PURPOSE.
+
+BATTERY MANAGEMENT INVOLVES ELECTRICAL SAFETY RISKS. THE SOFTWARE
+MUST NOT BE USED AS A SUBSTITUTE FOR THE JK-BMS HARDWARE PROTECTIONS,
+ELECTRICAL PROTECTIVE DEVICES, OR APPROPRIATE HUMAN SUPERVISION.
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER IS
+NOT LIABLE FOR DAMAGES OR LOSSES ARISING FROM USE OF THE SOFTWARE.
+
+7. LEGAL RIGHTS
+
+All rights not expressly granted are reserved. No trademark, patent,
+or ownership rights are granted by this license.
+
+Any mandatory rights under applicable law, and rights already
+irrevocably granted for third-party or separately licensed materials,
+remain unaffected.
+
+END OF LICENSE
