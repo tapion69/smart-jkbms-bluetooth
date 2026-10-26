@@ -1,54 +1,86 @@
 "use strict";
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
-const assert = require("assert");
-const source = path.join(__dirname, "../smart-jkbms-bluetooth/bip_flows.json");
-const nodes = JSON.parse(fs.readFileSync(source, "utf8"));
-assert.equal(nodes.length, 5);
-const ids = nodes.map(n => n.id);
-assert.equal(new Set(ids).size, ids.length);
-const inject = nodes.find(n => n.type === "inject");
-const fn = nodes.find(n => n.type === "function" && n.name === "Check BIP consent");
-const http = nodes.find(n => n.type === "http request");
-assert(inject && fn && http);
-assert.equal(inject.once, true);
-assert.equal(inject.crontab, "0 15 * * *");
-assert.equal(http.url, "");  // No fixed endpoint in the flow.
-const config = fs.readFileSync(path.join(__dirname, "../smart-jkbms-bluetooth/config.yaml"), "utf8");
-const runner = fs.readFileSync(path.join(__dirname, "../smart-jkbms-bluetooth/run.sh"), "utf8");
-assert.match(config, /^  send_bip: true$/m, "New installs must send BIP by default");
-assert.match(config, /^  bip_endpoint: "https:\/\/script\.google\.com\/macros\/s\/.+\/exec"$/m);
-assert.match(runner, /\.send_bip \/\/ true/, "Older installations missing this option default ON");
-assert.match(runner, /SMART_JKBMS_BIP_ENDPOINT/, "Export collector URL");
-
-const statuses = [];
-const node = {status: v => statuses.push(v)};
-const id = "f34c41fe-5678-4c9d-bef2-fb4771827a3d";
-const endpoint = "https://example.org/collector";
-function prepare(values) {
-  const context = {
-    env: { get: name => values[name] || "" },
-    node, msg: {payload:"old"}
-  };
-  return vm.runInNewContext("(function() {" + fn.func + "\n})()", context);
+const fs=require("fs"),path=require("path"),vm=require("vm"),assert=require("assert");
+const root=path.join(__dirname,"../smart-jkbms-bluetooth");
+const nodes=JSON.parse(fs.readFileSync(path.join(root,"bip_flows.json"),"utf8"));
+const named=name=>nodes.find(n=>n.name===name);
+const gate=named("BIP permitted?");
+const os=named("Analyse environnement");
+const prepare=named("Prépare Google JK-BMS");
+const post=named("POST Google JK-BMS");
+const redirect=named("Vérifier redirection Google");
+const get=named("GET Google JSON (no POST replay)");
+const result=named("BIP result");
+const inject=named("Startup + daily BIP");
+assert.equal(nodes.length,9);
+assert.equal(new Set(nodes.map(n=>n.id)).size,nodes.length);
+assert([gate,os,prepare,post,redirect,get,result,inject].every(Boolean));
+assert.equal(inject.once,true);
+assert.equal(inject.crontab,"0 15 * * *");
+const url="https://script.google.com/macros/s/AKfycbyZsVdzOpUW32VetqOZ228eyftHxoCCAh6LvNH92wx8sb030-TuJqLPgANH3DZdL50y-g/exec";
+assert.equal(post.url,url,"Finance-style POST node must have its actual Google endpoint configured");
+assert.equal(post.method,"POST");
+assert.equal(post.ret,"txt");
+assert.equal(get.method,"GET","Never replay the original POST to googleusercontent");
+assert.equal(get.url,"https://script.googleusercontent.com/macros/echo?{{{googleQuery}}}");
+assert.equal(redirect.outputs,2);
+assert.deepEqual(redirect.wires,[[get.id],[result.id]]);
+const config=fs.readFileSync(path.join(root,"config.yaml"),"utf8");
+const runner=fs.readFileSync(path.join(root,"run.sh"),"utf8");
+assert.match(config,/^  send_bip: true$/m);
+assert(config.includes(url));
+assert.match(runner,/\.send_bip \/\/ true/);
+const version=config.match(/^version: "([^"]+)"$/m)[1];
+const id="f34c41fe-5678-4c9d-bef2-fb4771827a3d";
+function simulate(nodeDef,msg,envValues={}){
+ const statuses=[],warnings=[];
+ const node={status:s=>statuses.push(s),warn:s=>warnings.push(String(s))};
+ const env={get:k=>envValues[k]||""};
+ const context={msg,env,node};
+ const val=vm.runInNewContext("(function(){"+nodeDef.func+"\n})()",context);
+ return {value:val,statuses,warnings};
 }
-assert.equal(prepare({SEND_BIP:"false",SMART_JKBMS_INSTALL_ID:id,SMART_JKBMS_BIP_ENDPOINT:endpoint}), null);
-assert.equal(prepare({SEND_BIP:"true",SMART_JKBMS_INSTALL_ID:id}), null);
-const data = prepare({
-  SEND_BIP:"true",
-  SMART_JKBMS_INSTALL_ID:id,
-  SMART_JKBMS_BIP_ENDPOINT:endpoint,
-  SMART_JKBMS_VERSION:"0.3.1"
-});
-assert(data);
-assert.equal(data.url, endpoint);
-assert.equal(data.method, "POST");
-assert.equal(data.followRedirects, false);
-assert.equal(data.payload.module, "jkbms");
-assert.equal(data.payload.install_id, id);
-assert.equal(data.payload.bip, "10");
-assert.equal(data.payload.version, "0.3.1");
-assert.deepEqual(Object.keys(data.payload).sort(), ["module","install_id","bip","version"].sort());
-assert(!/(mac|serial|voltage|current|soc|longitude|latitude|country|city|region)/i.test(fn.func));
-console.log("BIP flow tests passed: default-on/opt-out, stable ID, no battery/location data, daily+startup trigger");
+const env={SEND_BIP:"true",SMART_JKBMS_INSTALL_ID:id,SMART_JKBMS_VERSION:version};
+assert.equal(simulate(gate,{payload:123},{...env,SEND_BIP:"false"}).value,null);
+assert.equal(simulate(gate,{payload:123},{...env,SMART_JKBMS_INSTALL_ID:"bad"}).value,null);
+let m=simulate(gate,{payload:123},env).value;
+m=simulate(os,m,env).value;
+m=simulate(prepare,m,env).value;
+assert.equal(m.payload.module,"jkbms");
+assert.equal(m.payload.install_id,id);
+assert.equal(m.payload.bip,"10");
+assert.equal(m.payload.version,version);
+assert.equal(m.followRedirects,false);
+assert.equal(m.headers["Content-Type"],"application/json");
+assert.equal(m.url,undefined,"Static POST node owns the endpoint");
+assert.deepEqual(Object.keys(m.payload).sort(),
+ ["module","install_id","bip","version","country","region","city","lat","lon"].sort());
+for(const k of ["country","region","city","lat","lon"])assert.equal(m.payload[k],"");
+const location="https://script.googleusercontent.com/macros/echo?user_content_key=AbC-12_%2F&lib=aa1";
+const redirectMsg={...m,statusCode:302,headers:{location},payload:""};
+const branch=simulate(redirect,redirectMsg);
+assert.equal(branch.value[1],null);
+assert.equal(branch.value[0].googleQuery,"user_content_key=AbC-12_%2F&lib=aa1");
+assert.equal(branch.value[0].method,undefined);
+assert.equal(branch.value[0].followRedirects,true);
+for (const status of ["created","updated"]) {
+ const done=simulate(result,{...branch.value[0],statusCode:200,
+     payload:{success:true,status,module:"jkbms",install_id:id}});
+ assert.equal(done.value.payload.success,true);
+ assert.equal(done.value.payload.status,status);
+ assert.equal(done.value.payload.install_id,undefined);
+ assert.equal(done.statuses.at(-1).fill,"green");
+}
+const denied=simulate(result,{...m,statusCode:200,payload:{success:false,error:"module ou onglet inconnu : jkbms"}});
+assert.equal(denied.value.payload.success,false);
+assert.match(denied.value.payload.reason,/module ou onglet inconnu/);
+assert.equal(denied.statuses.at(-1).fill,"red");
+const missing=simulate(redirect,{...m,statusCode:302,headers:{}});
+assert.equal(missing.value[0],null);
+assert.match(missing.value[1].bipError,/redirect missing/);
+const missingRes=simulate(result,missing.value[1]);
+assert.equal(missingRes.value.payload.success,false);
+const hostile=simulate(redirect,{...m,statusCode:302,headers:{location:"https://evil.example/macros/echo?token=x"}});
+assert.equal(hostile.value[0],null,"Do not fetch untrusted redirect origins");
+assert.equal(simulate(result,{...m,statusCode:302,payload:""}).value.payload.success,false,
+ "302 is never proof of insertion in Google Sheets");
+console.log("OK JK-BMS: Finance-style fixed POST, redirect-as-GET, JSON created/updated, failures and opt-out");
