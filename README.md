@@ -4,7 +4,7 @@
 
 # Smart JK-BMS Bluetooth for Home Assistant
 
-**Development preview — v0.3.4. Testers wanted!**
+**Development preview — v0.3.5. Testers wanted!**
 
 An experimental, community-tested Home Assistant add-on for monitoring multiple JK-BMS batteries over Bluetooth Low Energy (BLE). The add-on combines a Python/Bleak connection manager, a lightweight Node-RED frame decoder and MQTT Discovery so supported JK-BMS readings appear as native Home Assistant entities. It is **free to use**.
 
