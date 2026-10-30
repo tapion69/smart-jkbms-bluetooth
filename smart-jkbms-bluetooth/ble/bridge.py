@@ -111,7 +111,8 @@ async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
     await forward("scan_start", adapter=adapter if mode=="local" else "esphome_proxy",
                   duration_seconds=duration, mode=mode)
     try:
-        scanner_class, _ = ble_classes(cfg)
+        scanner_class = (ble_classes(cfg)[0] if proxy_enabled(cfg)
+                         else BleakScanner)
         if proxy_enabled(cfg):
             # The proxy's advertisements are populated asynchronously over
             # the ESPHome API; HaBleakScannerWrapper reads that shared cache.
@@ -266,7 +267,8 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
     await forward("connection_start", address=address)
     try:
         kwargs = {} if proxy_enabled(cfg) else scan_kwargs(adapter)
-        _, client_class = ble_classes(cfg)
+        client_class = (ble_classes(cfg)[1] if proxy_enabled(cfg)
+                        else BleakClient)
         link_lost = asyncio.Event()
         if persistent:
             kwargs["disconnected_callback"] = lambda _client: link_lost.set()
