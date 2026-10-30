@@ -76,6 +76,52 @@ class ProxyOptionsTests(unittest.TestCase):
                 shutdown.assert_awaited_once()
         asyncio.run(run())
 
+    def test_remote_scan_uses_esp32_advertisements_without_local_adapter(self):
+        async def run():
+            import bridge
+            mac="C8:47:80:1A:27:12"
+            device=SimpleNamespace(name="JK-BMS")
+            advert=SimpleNamespace(local_name="JK-BMS",rssi=-48,
+                                   service_uuids=["0000ffe0"])
+            remote_scan=SimpleNamespace(discover=AsyncMock(
+                return_value={mac:(device,advert)}))
+            cfg={"ble_connection_mode":"esphome_proxy",
+                 "proxy_host":"192.168.1.100",
+                 "bluetooth_adapter":"hci3","bms_addresses":mac}
+            with patch.object(bridge,"ble_classes",return_value=(remote_scan,object())), \
+                 patch.object(bridge,"forward",AsyncMock(return_value=True)), \
+                 patch.object(bridge.asyncio,"sleep",AsyncMock()), \
+                 patch.object(bridge.BleakScanner,"discover",AsyncMock(
+                      side_effect=AssertionError("Local BLE scanner must not run"))):
+                devices=await bridge.scan(cfg)
+            self.assertIs(devices[mac],device)
+            remote_scan.discover.assert_awaited_once_with(return_adv=True)
+        asyncio.run(run())
+
+    def test_remote_probe_uses_wrapper_instead_of_local_bluez(self):
+        async def run():
+            import bridge
+            device=object()
+            class RemoteClient:
+                services=[]
+                async def __aenter__(self):
+                    return self
+                async def __aexit__(self,*args):
+                    return False
+            factory=MagicMock(return_value=RemoteClient())
+            cfg={"ble_connection_mode":"esphome_proxy",
+                 "proxy_host":"192.168.1.100","bluetooth_adapter":"hci2"}
+            with patch.object(bridge,"ble_classes",return_value=(object(),factory)), \
+                 patch.object(bridge,"forward",AsyncMock(return_value=True)), \
+                 patch.object(bridge.asyncio,"sleep",AsyncMock()), \
+                 patch.object(bridge,"BleakClient",MagicMock(
+                     side_effect=AssertionError("BlueZ client must not run"))):
+                await bridge.probe("C8:47:80:1A:27:12",cfg,device)
+            self.assertIs(factory.call_args.args[0],device)
+            self.assertEqual(factory.call_args.kwargs["timeout"],15)
+            self.assertNotIn("bluez",factory.call_args.kwargs)
+        asyncio.run(run())
+
     def test_remote_scan_and_probe_choose_proxy_not_bluez(self):
         # Structural safety: the proxy scanner path must never pass hci0/BlueZ
         # arguments; the same probe() GATT code is reused for both transports.
