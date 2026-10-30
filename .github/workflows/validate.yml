@@ -27,6 +27,11 @@ jobs:
               print('OK', path)
           PY
 
+      - name: Build Linux amd64 add-on image (validate Python wheels)
+        timeout-minutes: 15
+        run: |
+          docker build --pull --progress=plain -t smart-jkbms-proxy-smoke ./smart-jkbms-bluetooth
+          docker run --rm --entrypoint /opt/venv/bin/python smart-jkbms-proxy-smoke -c "import bleak, bleak_esphome, habluetooth, aioesphomeapi; print('ESPHome Bluetooth Proxy Python dependencies ready')"
       - name: BLE unit tests without hardware
         run: python -m unittest discover -s tests -v
       - name: Node-RED frame assembly checks
