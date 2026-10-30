@@ -372,6 +372,10 @@ class HomeAssistantMQTT:
         self.permission:dict[str,bool]={mac:False for mac in addresses}
         self.command_pending:dict[str,float]={}
         self.pending_parameter_writes:set[str]=set()
+        # Suppress duplicate MQTT commands while a write is running or soon
+        # after a verified readback. No unverified writes count as success.
+        self.pending_parameter_value:dict[str,tuple[str,bool|float]]={}
+        self.recent_confirmed_parameter:dict[str,tuple[str,bool|float,float]]={}
         self.last_settings_frame:dict[str,float]={}
         self.settings_frame_rejected:dict[str,int]={}
         self.loop:asyncio.AbstractEventLoop|None=None
@@ -468,9 +472,6 @@ class HomeAssistantMQTT:
         if self.loop is None or self.control is None:
             self.emit(mac,"command_status","Refus : liaison BLE indisponible")
             return
-        if mac in self.pending_parameter_writes:
-            self.emit(mac,"command_status","Commande déjà en cours pour ce BMS")
-            return
         try:
             if p.kind=="switch":
                 if payload not in (b"ON",b"OFF"):return
@@ -481,7 +482,26 @@ class HomeAssistantMQTT:
         except (ValueError,UnicodeDecodeError,OverflowError):
             self.emit(mac,"command_status","Refus : valeur invalide pour "+key)
             return
+        # A repeated HA/MQTT command must not replace the last successful
+        # status or cause a second BLE write. Distinct values are not merged.
+        target=(key,value)
+        if mac in self.pending_parameter_writes:
+            if self.pending_parameter_value.get(mac)==target:
+                LOG.info("Ignoring identical in-flight JK-BMS command for %s (%s)",mac,key)
+                return
+            self.emit(mac,"command_status","Commande déjà en cours pour ce BMS")
+            return
+        prior=self.recent_confirmed_parameter.get(mac)
+        if prior is not None and prior[0:2]==target and time.monotonic()-prior[2]<15:
+            current=self.settings.get(mac,{}).get(key)
+            matches=(current==value if p.kind=="switch" else
+                     type(current) in (int,float) and
+                     abs(current-value)<=max(1e-5,p.step/2))
+            if matches:
+                LOG.info("Ignoring identical already-confirmed JK-BMS command for %s (%s)",mac,key)
+                return
         self.pending_parameter_writes.add(mac)
+        self.pending_parameter_value[mac]=target
 
         async def confirmed_readback_after(since:float, seconds:float)->bool:
             deadline=time.monotonic()+seconds
@@ -543,8 +563,15 @@ class HomeAssistantMQTT:
                      "register":p.reg,"value":value,"confirmation":CONFIRM})
                 if status!=202:
                     with self._lock:
-                        self.emit(mac,"command_status",
-                            "Refus "+key+" : "+str(result.get("error","échec")))
+                        if result.get("error")=="write_rate_limit_15s":
+                            remaining=result.get("retry_after_seconds")
+                            suffix=(" (encore "+str(remaining)+" s)" if
+                                    type(remaining) is int and remaining>0 else "")
+                            message=("Refus "+key+" : délai de sécurité entre écritures"
+                                     " de 15 s"+suffix+". Réessayez après ce délai.")
+                        else:
+                            message="Refus "+key+" : "+str(result.get("error","échec"))
+                        self.emit(mac,"command_status",message)
                     return
                 with self._lock:
                     self.emit(mac,"command_status",
@@ -555,6 +582,8 @@ class HomeAssistantMQTT:
                         confirmed=(actual==value if p.kind=="switch" else
                             type(actual) in (int,float) and
                             abs(actual-value)<=max(1e-5,p.step/2))
+                        if confirmed:
+                            self.recent_confirmed_parameter[mac]=(key,value,time.monotonic())
                         self.emit(mac,"command_status",
                             ("Confirmé par le BMS : "+key+" = "+str(actual))
                             if confirmed else
@@ -572,6 +601,7 @@ class HomeAssistantMQTT:
             finally:
                 with self._lock:
                     self.pending_parameter_writes.discard(mac)
+                    self.pending_parameter_value.pop(mac,None)
 
         future=asyncio.run_coroutine_threadsafe(perform(),self.loop)
         def done(f):
@@ -580,6 +610,7 @@ class HomeAssistantMQTT:
                 LOG.error("Unexpected parameter task error: %s",exc)
                 with self._lock:
                     self.pending_parameter_writes.discard(mac)
+                    self.pending_parameter_value.pop(mac,None)
         future.add_done_callback(done)
 
     def _device(self,mac:str)->dict[str,Any]:
