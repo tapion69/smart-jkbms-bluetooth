@@ -944,6 +944,7 @@ class HomeAssistantMQTT:
                 self.last_data.pop(mac,None)
                 self.last_confirmed.pop(mac,None)
                 self.settings.pop(mac,None)
+                self.recent_confirmed_parameter.pop(mac,None)
                 self.last_telemetry_frame.pop(mac,None)
                 self.last_telemetry_sequence.pop(mac,None)
                 self.permission[mac]=False
