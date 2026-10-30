@@ -31,7 +31,7 @@ export BLE_BMS_ADDRESSES="$(jq -r '.bms_addresses // ""' "$OPTIONS")"
 export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
 # Persistent anonymous UUID used by the opt-out BIP, never derived from the BMS.
 export SMART_JKBMS_INSTALL_ID="$(/opt/venv/bin/python /addon/ble/installation_id.py)"
-export SMART_JKBMS_VERSION="0.3.6"
+export SMART_JKBMS_VERSION="0.3.7"
 export SEND_BIP="$(jq -r '(.send_bip // true) | if . == true then "true" else "false" end' "$OPTIONS")"
 NR_PID=""
 BLE_PID=""
@@ -45,7 +45,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.3.6"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.3.7"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting lightweight JK02 decoder and BLE-to-MQTT bridge"
 
