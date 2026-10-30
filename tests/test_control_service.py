@@ -74,6 +74,9 @@ class TemperatureControlTests(unittest.TestCase):
             status,body=await svc.dispatch({"address":A,"action":"set_temperature_disabled",
                 "disable":False,"confirmation":CONFIRM})
             self.assertEqual(status,429)
+            self.assertEqual(body["error"],"write_rate_limit_15s")
+            self.assertGreaterEqual(body["retry_after_seconds"],1)
+            self.assertLessEqual(body["retry_after_seconds"],15)
             svc.unregister(A)
         asyncio.run(run())
 
@@ -129,6 +132,14 @@ class TemperatureControlTests(unittest.TestCase):
             self.assertEqual(status,202)
             self.assertTrue(result["write_sent"])
             self.assertFalse(result["verified_by_bms"])
+            # A second, different setting on the same pack is still blocked.
+            status,body=await svc.dispatch({
+                "address":A,"action":"write_parameter",
+                "register":0x22,"value":2.601,"confirmation":CONFIRM})
+            self.assertEqual(status,429)
+            self.assertEqual(body["error"],"write_rate_limit_15s")
+            self.assertGreaterEqual(body["retry_after_seconds"],1)
+            self.assertLessEqual(body["retry_after_seconds"],15)
             svc.unregister(A)
         asyncio.run(run())
 
