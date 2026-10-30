@@ -1,4 +1,13 @@
 configuration:
+  ble_connection_mode:
+    name: Mode de connexion Bluetooth
+    description: local pour l'adaptateur du serveur Home Assistant ou esphome_proxy pour un ESP32 ESPHome via Wi-Fi.
+  proxy_host:
+    name: Adresse du proxy ESPHome
+    description: IP du proxy ESP32 sur le réseau local, sans port (ex. 192.168.1.100). Uniquement en mode esphome_proxy.
+  proxy_noise_psk:
+    name: Clé API chiffrée ESPHome
+    description: Clé de chiffrement ESPHome (api.encryption.key). Laisser vide uniquement si l'API ESPHome du proxy n'est pas chiffrée.
   bluetooth_adapter:
     name: Adaptateur Bluetooth
     description: auto pour utiliser BlueZ automatiquement, ou hci0/hci1 pour choisir.
