@@ -34,12 +34,35 @@ On Android, use a Bluetooth LE scanner such as **[nRF Connect for Mobile](https:
 
 **iOS note:** iPhones usually display an identifier rather than the actual BLE MAC. Use an Android BLE scanner or a Linux/BlueZ device when the MAC is not available.
 
+## ESP32 Bluetooth Proxy (optional)
+
+If Home Assistant is too far from your batteries, place an **ESP32 running ESPHome Bluetooth Proxy** near the JK-BMS devices. The add-on then communicates over Wi-Fi instead of using a local Bluetooth adapter.
+
+1. Install the official firmware: [ESPHome Bluetooth Proxy](https://esphome.io/projects/?type=bluetooth).
+2. Add the proxy in Home Assistant / ESPHome and make sure its native API (TCP **6053**) is reachable from the add-on.
+3. In the add-on settings choose `ble_connection_mode: esphome_proxy`, enter the ESP32's LAN address in `proxy_host` and copy its `api.encryption.key` into `proxy_noise_psk`. Use an empty key **only** if the proxy API is deliberately unencrypted.
+4. Keep the same `bms_addresses` and MQTT credentials; restart the add-on.
+
+Example (with a fictitious IP and without exposing your key):
+
+```yaml
+ble_connection_mode: esphome_proxy
+proxy_host: "192.168.1.100"
+proxy_noise_psk: "YOUR_ESPHOME_API_ENCRYPTION_KEY"
+```
+
+An active ESPHome proxy (`bluetooth_proxy: { active: true }`) is required for JK-BMS GATT connections. The ESP32 does **not** decode the batteries: Smart JK-BMS still performs all parsing, MQTT reporting and protected parameter writes. The normal `local` mode remains the default.
+
+**Development feature:** proxy connections and reconnection still need testing on real JK-BMS hardware. In particular, test a single BMS before adding more devices. An ESP32 usually starts with three active BLE slots.
+
 ## Main settings
 
 | Setting | Purpose |
 |---|---|
 | `bms_addresses` | Comma-separated Bluetooth MAC addresses; add one entry per BMS. |
-| `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3`. |
+| `ble_connection_mode` | `local` (default) or `esphome_proxy`. |
+| `proxy_host` / `proxy_noise_psk` | ESP32 network address and encrypted ESPHome API key, only for proxy mode. |
+| `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3` in local mode. |
 | `persistent_connections` | Keep sessions connected and reconnect automatically (recommended). |
 | `mqtt_host` / `mqtt_port` | Usually `core-mosquitto` / `1883`. |
 | `mqtt_username` / `mqtt_password` | Your MQTT broker login. |
