@@ -472,6 +472,63 @@ class MQTTTests(unittest.TestCase):
             self.assertFalse(m.pending_parameter_writes)
         asyncio.run(run())
 
+    def test_confirmed_balance_2601_duplicate_mqtt_commands_not_rewritten(self):
+        # Reproduces "Confirmé ... balance_start_v = 2.601", immediately
+        # followed by an MQTT resend. The last confirmed status must remain.
+        async def run():
+            m,c=self.instance()
+            m.cfg["allow_parameter_changes"]=True
+            m.loop=asyncio.get_running_loop()
+            m.ingest(sample_data(A))
+            m.permission[A]=True
+            m.ingest({"kind":"frame","address":A,"frame_type":1,
+                      "raw_hex":settings_frame()})
+            requested=[]
+            def balance_frame(voltage):
+                frame=bytearray.fromhex(settings_frame())
+                frame[138:142]=round(voltage*1000).to_bytes(4,"little")
+                frame[299]=sum(frame[:299])&255
+                return {"kind":"frame","address":A,"frame_type":1,
+                        "raw_hex":frame.hex()}
+            async def dispatch(request):
+                self.assertEqual(request["action"],"write_parameter")
+                self.assertEqual(request["register"],0x22)
+                requested.append(request["value"])
+                if len(requested)>1:
+                    return 429,{"error":"write_rate_limit_15s",
+                                "retry_after_seconds":14}
+                m.loop.call_later(.05,m.ingest,balance_frame(request["value"]))
+                return 202,{"write_sent":True,"verified_by_bms":False}
+            m.control=SimpleNamespace(dispatch=dispatch)
+            topic=m.base(A)+"/parameters/balance_start_v/set"
+            def send(value):
+                m.on_message(c,None,SimpleNamespace(
+                    topic=topic,payload=value,retain=False))
+            send(b"2.601")
+            send(b"2.601")  # duplicate while first command still pending
+            await asyncio.sleep(.3)
+            self.assertEqual(requested,[2.601])
+            statuses=[v for t,v,_,_ in c.published
+                      if t==m.base(A)+"/command_status"]
+            self.assertIn("Confirmé par le BMS : balance_start_v = 2.601",
+                          statuses)
+            count=len(statuses)
+            send(b"2.601")  # identical after BMS confirmation
+            await asyncio.sleep(.03)
+            self.assertEqual(requested,[2.601])
+            self.assertEqual(len([v for t,v,_,_ in c.published
+                         if t==m.base(A)+"/command_status"]),count)
+            send(b"2.602")  # different value: keep safety cooldown
+            await asyncio.sleep(.05)
+            self.assertEqual(requested,[2.601,2.602])
+            statuses=[v for t,v,_,_ in c.published
+                      if t==m.base(A)+"/command_status"]
+            self.assertTrue(any("15 s" in x and "encore 14 s" in x
+                                for x in statuses),statuses)
+            self.assertAlmostEqual(m.settings[A]["balance_start_v"],2.601)
+            self.assertFalse(m.pending_parameter_writes)
+        asyncio.run(run())
+
     def test_settings_missing_never_writes_and_explains_no_0x01(self):
         import mqtt_ha
         async def run():
