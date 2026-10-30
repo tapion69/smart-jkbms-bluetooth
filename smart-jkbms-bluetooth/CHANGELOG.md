@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.7 — Safer Home Assistant parameter write feedback (development preview)
+
+- Fixed misleading `Confirmé par le BMS ...` followed immediately by `write_rate_limit_15s` when Home Assistant or another MQTT publisher repeats the **same** parameter value.
+- Identical commands sent during an ongoing write or within 15 seconds of a **BMS-confirmed** identical write are silently ignored. A failed/unverified write is never considered confirmed.
+- Distinct write requests still respect the strict **15-second per-BMS safety rate limit**. Refusals now display the remaining wait time in seconds; no writes are queued or replayed automatically.
+- Clear recent-success suppression state on BMS disconnect, protecting against stale readback after reconnection.
+- Regression tests cover `balance_start_v = 2.601 V`, duplicate MQTT submissions, fresh different values and the central rate limit.
+- Bluetooth frame decoding, readback verification, authorization guards, BIP and MQTT entity identities remain unchanged.
+
 ## 0.3.6 — Simplified BIP configuration and shorter README (development preview)
 
 - Keep **one** BIP setting: `send_bip` (enabled by default; `false` disables the complete BIP process).
