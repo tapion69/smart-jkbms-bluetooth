@@ -23,6 +23,7 @@ from bleak.exc import BleakDeviceNotFoundError
 
 from control import ControlService, temperature_control_frame
 from parameters import build_write
+from proxy import ble_classes, proxy_enabled, proxy_session
 
 LOG = logging.getLogger("smart_jkbms_ble")
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
@@ -106,11 +107,20 @@ async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
     duration = int(cfg.get("scan_duration_seconds", 8))
     show_all = bool(cfg.get("scan_all_devices", False))
     known_addresses = set(addresses(str(cfg.get("bms_addresses", ""))))
-    await forward("scan_start", adapter=adapter, duration_seconds=duration)
+    mode = "esphome_proxy" if proxy_enabled(cfg) else "local"
+    await forward("scan_start", adapter=adapter if mode=="local" else "esphome_proxy",
+                  duration_seconds=duration, mode=mode)
     try:
-        detected = await BleakScanner.discover(
-            timeout=duration, return_adv=True, **scan_kwargs(adapter)
-        )
+        scanner_class, _ = ble_classes(cfg)
+        if proxy_enabled(cfg):
+            # The proxy's advertisements are populated asynchronously over
+            # the ESPHome API; HaBleakScannerWrapper reads that shared cache.
+            await asyncio.sleep(duration)
+            detected = await scanner_class.discover(return_adv=True)
+        else:
+            detected = await scanner_class.discover(
+                timeout=duration, return_adv=True, **scan_kwargs(adapter)
+            )
         jk_count = 0
         found: dict[str, BLEDevice] = {}
         for address, (device, advertisement) in detected.items():
@@ -255,12 +265,13 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
     listen = int(cfg.get("connection_probe_seconds", 15))
     await forward("connection_start", address=address)
     try:
-        kwargs = scan_kwargs(adapter)
+        kwargs = {} if proxy_enabled(cfg) else scan_kwargs(adapter)
+        _, client_class = ble_classes(cfg)
         link_lost = asyncio.Event()
         if persistent:
             kwargs["disconnected_callback"] = lambda _client: link_lost.set()
-        # Uses host BlueZ; this add-on never automatically power-cycles its adapter.
-        async with BleakClient(device, timeout=15, **kwargs) as client:
+        # Local mode uses BlueZ; remote mode routes GATT through ESPHome.
+        async with client_class(device, timeout=15, **kwargs) as client:
             services = list(client.services)
             characteristics = [c for s in services for c in s.characteristics]
             notify_char = next(
@@ -515,7 +526,7 @@ def bluez_cached_connected(
 async def find_bluez_connected(
     cfg: dict[str, Any], wanted: list[str]
 ) -> dict[str, BLEDevice]:
-    if not wanted:
+    if not wanted or proxy_enabled(cfg):
         return {}
     adapter = str(cfg.get("bluetooth_adapter", "auto"))
     bus = None
@@ -668,11 +679,18 @@ async def main() -> None:
         await asyncio.sleep(1)
     LOG.info("Node-RED diagnostic endpoint ready")
     startup = True
-    try:
-        await maybe_reset_adapter_on_start(options())
-    except Exception:
-        LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
     cfg = options()
+    if not proxy_enabled(cfg):
+        try:
+            await maybe_reset_adapter_on_start(cfg)
+        except Exception:
+            LOG.exception("Optional BLE adapter reset encountered an error; proceeding")
+    async with proxy_session(cfg, forward):
+        await run_connections(cfg)
+
+
+async def run_connections(cfg: dict[str, Any]) -> None:
+    """Shared MQTT/Node-RED and BMS session logic for both BLE transports."""
     if bool(cfg.get("persistent_connections", True)):
         # Import lazily, preserving standalone BLE diagnostics/test mode.
         from mqtt_ha import HomeAssistantMQTT
