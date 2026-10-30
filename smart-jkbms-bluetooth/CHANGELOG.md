@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.8 — Optional ESPHome Bluetooth Proxy over Wi-Fi (development preview)
+
+- Introduced a **local / esphome_proxy** BLE connection mode, with local Bluetooth remaining the default for existing installations.
+- Connects to one ESP32 ESPHome active Bluetooth Proxy via its encrypted native API on TCP port 6053, using `bleak-esphome` and `habluetooth` for remote scans, GATT notifications, read commands and controlled parameter writes.
+- Added `proxy_host` (LAN IP or DNS hostname) and protected `proxy_noise_psk` (optional ESPHome encryption key) options.
+- The proxy connection is managed in the background and automatically reconnects after Wi-Fi interruptions; an offline proxy does not prevent MQTT diagnostics from starting.
+- Disables host BlueZ lookups and adapter resets in proxy mode. No automatic failover to a local radio or uncontrolled BMS writes.
+- Retains the same Node-RED decoder, MQTT entities, one-BMS-one-session behavior and 15-second write safeguards.
+- Added proxy-mode unit tests, Docker image build/dependency smoke test and concise ESP32 setup instructions.
+- **Requires real ESP32 / JK-BMS testing** before being considered stable. One proxy is supported initially; multi-proxy routing is not yet implemented.
+
 ## 0.3.7 — Safer Home Assistant parameter write feedback (development preview)
 
 - Fixed misleading `Confirmé par le BMS ...` followed immediately by `write_rate_limit_15s` when Home Assistant or another MQTT publisher repeats the **same** parameter value.
