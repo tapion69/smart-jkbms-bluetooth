@@ -9,6 +9,7 @@ import asyncio
 import hmac
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -113,11 +114,14 @@ class ControlService:
                 return 403, {"error": "explicit_confirmation_required"}
             if type(payload.get("disable")) is not bool:
                 return 400, {"error": "boolean_disable_value_required"}
-            last = self.last_write.get(mac, 0.0)
-            if asyncio.get_running_loop().time()-last < 15:
-                return 429, {"error": "write_rate_limit_15s"}
-        if action == "write_parameter" and asyncio.get_running_loop().time()-self.last_write.get(mac,0.0)<15:
-            return 429, {"error": "write_rate_limit_15s"}
+        # Keep the 15-second physical write safeguard for *all* BMS parameters.
+        # The MQTT layer may ignore duplicate, already-confirmed requests, but
+        # distinct writes must still pass this central rate limit.
+        if action in ("set_temperature_disabled", "write_parameter"):
+            elapsed = asyncio.get_running_loop().time()-self.last_write.get(mac,0.0)
+            if elapsed < 15:
+                return 429, {"error":"write_rate_limit_15s",
+                             "retry_after_seconds":max(1,math.ceil(15-elapsed))}
         queue = self.sessions.get(mac)
         if queue is None:
             return 409, {"error": "bms_not_connected_or_no_persistent_session"}
