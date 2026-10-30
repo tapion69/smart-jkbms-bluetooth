@@ -6,7 +6,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apk add --no-cache \
     bash jq nodejs npm python3 py3-pip py3-virtualenv dbus-libs tzdata \
     && python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir bleak==3.0.2 paho-mqtt==2.1.0 \
+    && /opt/venv/bin/pip install --no-cache-dir bleak==3.0.2 paho-mqtt==2.1.0 bleak-esphome==4.1.0 \
     && npm install --global --no-audit --no-fund --unsafe-perm \
          node-red@5.0.9 \
     && npm cache clean --force
@@ -14,7 +14,7 @@ RUN apk add --no-cache \
 COPY . /addon
 WORKDIR /addon
 RUN chmod +x /addon/run.sh \
-    && python3 -m py_compile /addon/ble/bridge.py
+    && python3 -m py_compile /addon/ble/bridge.py /addon/ble/proxy.py
 
 EXPOSE 1895
 ENTRYPOINT ["/addon/run.sh"]
