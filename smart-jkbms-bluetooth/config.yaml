@@ -18,6 +18,9 @@ ports_description:
 panel_icon: mdi:bluetooth
 options:
   bluetooth_adapter: auto
+  ble_connection_mode: local
+  proxy_host: ""
+  proxy_noise_psk: ""
   scan_interval_seconds: 45
   scan_duration_seconds: 8
   scan_all_devices: false
@@ -37,6 +40,9 @@ options:
   send_bip: true
 schema:
   bluetooth_adapter: list(auto|hci0|hci1|hci2|hci3)
+  ble_connection_mode: list(local|esphome_proxy)
+  proxy_host: str?
+  proxy_noise_psk: password?
   scan_interval_seconds: int(20,300)
   scan_duration_seconds: int(3,20)
   scan_all_devices: bool
