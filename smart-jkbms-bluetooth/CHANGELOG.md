@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.9 — JK02_32S Set SOC calibration (development preview)
+
+- Added a separate **Set SOC** Home Assistant number (0–100%, whole percentages) for each JK-BMS that reports validated JK02_32S telemetry and a confirmed firmware version 11 or newer.
+- Uses the dedicated single-byte JK-BMS register **0x6E**. It is not one of the ordinary 0x01 configuration parameters.
+- Requires BOTH the add-on **allow_parameter_changes** setting and per-BMS **Allow Parameter Changes** switch; all writes require an internal explicit confirmation, use the original 15-second per-BMS rate limit, reject retained MQTT commands, and never replay writes.
+- The entity is **not optimistic**: its value follows the real SOC reported by the BMS. A separate command status indicates when the fresh telemetry matches the requested SOC or the outcome cannot be verified.
+- Capability detection fails closed for JK02_24S, older/unknown firmware, offline BMS, or missing verified 0x03 device information. Unsupported devices do not expose Set SOC.
+- Supports any number of independently configured BMS addresses (including four); no changes to existing MQTT entity IDs, BLE local/proxy transports, or the Node-RED pipeline.
+- New unit tests verify 0x6E packet bytes, 4-pack isolation, safety gates, and confirmation behavior. **The write command still requires real hardware testing** before declaring broad compatibility.
+
+
 ## 0.3.8 — Optional ESPHome Bluetooth Proxy over Wi-Fi (development preview)
 
 - Introduced a **local / esphome_proxy** BLE connection mode, with local Bluetooth remaining the default for existing installations.
