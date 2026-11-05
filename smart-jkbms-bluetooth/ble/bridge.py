@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.8.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.9.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -21,7 +21,7 @@ from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakDeviceNotFoundError
 
-from control import ControlService, temperature_control_frame
+from control import ControlService, temperature_control_frame, soc_calibration_frame
 from parameters import build_write
 from proxy import ble_classes, proxy_enabled, proxy_session
 
@@ -396,6 +396,15 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                                     await asyncio.sleep(0.5)
                                     await send_read_handshake("verify_modified_parameter")
                                     result={"register":f"0x{command.register:02X}"}
+                                elif command.action == "set_soc":
+                                    if write_char is None:
+                                        raise RuntimeError("BLE write characteristic unavailable")
+                                    packet = soc_calibration_frame(command.value)
+                                    response = "write-without-response" not in write_char.properties
+                                    await client.write_gatt_char(write_char, packet, response=response)
+                                    await forward("soc_calibration_sent", address=address,
+                                                  register="0x6E", confirmed_by_bms=False)
+                                    result = {"register": "0x6E"}
                                 elif command.action == "set_temperature_disabled":
                                     if write_char is None:
                                         raise RuntimeError("BLE write characteristic unavailable")
@@ -673,7 +682,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.8", note="JK02_single_BIP_option"
+        "bridge_start", version="0.3.9", note="JK02_single_BIP_option"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
