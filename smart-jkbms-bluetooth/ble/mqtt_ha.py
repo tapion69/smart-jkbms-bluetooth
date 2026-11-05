@@ -360,6 +360,7 @@ class HomeAssistantMQTT:
         self._lock=threading.RLock()
         self.last_data:dict[str,float]={}
         self.info_confirmed:set[str]=set()  # type 0x03 seen in this BLE session
+        self.soc_calibration_discovered:set[str]=set()
         self.state:dict[str,dict[str,Any]]={}
         self.settings:dict[str,dict[str,Any]]={}
         self.info:dict[str,dict[str,Any]]={}
@@ -890,9 +891,12 @@ class HomeAssistantMQTT:
                 "optimistic":False,"retain":False,
                 "icon":"mdi:battery-sync"
             })
-        else:
-            # Remove discovery for unsupported BMS or a stale previous session.
+            self.soc_calibration_discovered.add(mac)
+        elif mac in self.soc_calibration_discovered:
+            # Tombstone only an entity which this process previously published.
+            # Avoid empty discovery configs during normal first-run read-only setup.
             self.send(f"{self.discovery}/number/{short_id(mac)}_soc_calibration/config","")
+            self.soc_calibration_discovered.discard(mac)
         self._component(mac,"write_permission","switch",
             "Allow Parameter Changes",{
                 "state_topic":root+"/write_permission/state",
