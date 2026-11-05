@@ -81,6 +81,8 @@ class SocCalibrationTests(unittest.TestCase):
     def test_incompatible_or_unconfirmed_firmware_hides_entity_and_blocks_command(self):
         m,c=instance()
         a=MACS[0]
+        m.discover(a,16)  # First advertise a supported device, then retract it.
+        self.assertIn(a,m.soc_calibration_discovered)
         cases=[
             ("JK02_24S","15.34",True),
             ("JK02_32S","10.20",True),
@@ -94,9 +96,10 @@ class SocCalibrationTests(unittest.TestCase):
             else:m.info_confirmed.discard(a)
             self.assertFalse(m.soc_calibration_supported(a))
             m.discover(a,16)
-            self.assertIn(
-                (f"homeassistant/number/{short_id(a)}_soc_calibration/config","",1,True),
-                c.published)
+            self.assertNotIn(a,m.soc_calibration_discovered)
+            self.assertTrue(any(
+                t==f"homeassistant/number/{short_id(a)}_soc_calibration/config"
+                and v=="" for t,v,_,_ in c.published))
         m.state[a]["format"]="JK02_32S"
         m.info[a]["software_version"]="15.34"
         m.info_confirmed.add(a)
