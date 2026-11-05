@@ -359,6 +359,7 @@ class HomeAssistantMQTT:
         self.connected=False
         self._lock=threading.RLock()
         self.last_data:dict[str,float]={}
+        self.info_confirmed:set[str]=set()  # type 0x03 seen in this BLE session
         self.state:dict[str,dict[str,Any]]={}
         self.settings:dict[str,dict[str,Any]]={}
         self.info:dict[str,dict[str,Any]]={}
@@ -410,6 +411,7 @@ class HomeAssistantMQTT:
                 base=self.base(mac)
                 self.client.subscribe(f"{base}/temperature_control/set",qos=1)
                 self.client.subscribe(f"{base}/write_permission/set",qos=1)
+                self.client.subscribe(f"{base}/soc_calibration/set",qos=1)
                 self.client.subscribe(f"{base}/parameters/+/set",qos=1)
             # The permission is intentionally non-persistent across reconnect.
             for mac in self.addresses:self.permission[mac]=False
@@ -451,6 +453,9 @@ class HomeAssistantMQTT:
                         "Modification des paramètres autorisée" if allow else
                         "Modification des paramètres verrouillée")
                     return
+                if msg.topic==f"{base}/soc_calibration/set":
+                    self._soc_calibration_command(mac,msg.payload)
+                    return
                 if msg.topic==f"{base}/temperature_control/set":
                     self._parameter_command(mac,"disable_temperature_sensors",msg.payload)
                     return
@@ -459,6 +464,125 @@ class HomeAssistantMQTT:
                     key=msg.topic[len(marker):-4]
                     self._parameter_command(mac,key,msg.payload)
                     return
+
+
+    def soc_calibration_supported(self, mac: str) -> bool:
+        """Only a decoded JK02_32S stream and verified firmware >=11 permit 0x6E.
+        Device-info evidence is invalidated on each BLE disconnection.
+        """
+        if mac not in self.info_confirmed:
+            return False
+        if self.state.get(mac,{}).get("format")!="JK02_32S":
+            return False
+        version=self.info.get(mac,{}).get("software_version")
+        match=re.fullmatch(r"(?:V)?(\d+)\.\d+(?:\.\d+)?", str(version or "").strip(),re.I)
+        if not match or int(match.group(1))<11:
+            return False
+        latest=self.last_data.get(mac,0.0)
+        return latest>0 and time.monotonic()-latest<30
+
+    def _soc_calibration_command(self, mac: str, payload: bytes) -> None:
+        """Non-optimistic, per-BMS calibration, confirmed by fresh telemetry."""
+        if not self.cfg.get("allow_parameter_changes",False) or not self.permission.get(mac,False):
+            self.emit(mac,"command_status","Refus Set SOC : autoriser d'abord les modifications")
+            return
+        if not self.soc_calibration_supported(mac):
+            self.emit(mac,"command_status","Refus Set SOC : protocole, firmware ou télémétrie non confirmés")
+            return
+        if self.loop is None or self.control is None:
+            self.emit(mac,"command_status","Refus Set SOC : liaison BLE indisponible")
+            return
+        try:
+            text_value=payload.decode("ascii").strip()
+            if len(text_value)>8:
+                raise ValueError("too long")
+            parsed=float(text_value)
+            if not math.isfinite(parsed) or parsed!=int(parsed) or not 0<=parsed<=100:
+                raise ValueError("not a valid SOC")
+            target=int(parsed)
+        except (ValueError,UnicodeDecodeError,OverflowError):
+            self.emit(mac,"command_status","Refus Set SOC : valeur entière attendue de 0 à 100 %")
+            return
+        actual=self.state.get(mac,{}).get("soc_pct")
+        if actual==target:
+            self.emit(mac,"command_status",f"Set SOC : valeur déjà à {target} %, aucune écriture")
+            return
+        request=("soc_calibration",target)
+        if mac in self.pending_parameter_writes:
+            if self.pending_parameter_value.get(mac)==request:
+                LOG.info("Ignoring duplicate pending SOC calibration for %s",mac)
+                return
+            self.emit(mac,"command_status","Refus Set SOC : commande déjà en cours pour ce BMS")
+            return
+        self.pending_parameter_writes.add(mac)
+        self.pending_parameter_value[mac]=request
+
+        async def perform()->None:
+            from control import SOC_CONFIRM
+            try:
+                with self._lock:
+                    if (not self.cfg.get("allow_parameter_changes",False) or
+                        not self.permission.get(mac,False) or
+                        not self.soc_calibration_supported(mac)):
+                        self.emit(mac,"command_status","Refus Set SOC : autorisation ou liaison perdue")
+                        return
+                    before=self.last_data[mac]
+                status,result=await self.control.dispatch({
+                    "address":mac,"action":"set_soc","value":target,
+                    "confirmation":SOC_CONFIRM
+                })
+                if status!=202:
+                    with self._lock:
+                        wait=result.get("retry_after_seconds")
+                        suffix=f" (encore {wait} s)" if type(wait) is int else ""
+                        self.emit(mac,"command_status",
+                            "Refus Set SOC : "+str(result.get("error","échec"))+suffix)
+                    return
+                with self._lock:
+                    self.emit(mac,"command_status",
+                        f"Set SOC {target} % transmis ; vérification du BMS…")
+                deadline=time.monotonic()+12.0
+                last_seen=None
+                while time.monotonic()<deadline:
+                    with self._lock:
+                        if not self.permission.get(mac,False) or not self.soc_calibration_supported(mac):
+                            self.emit(mac,"command_status",
+                                "Set SOC : liaison perdue, résultat non confirmé")
+                            return
+                        if self.last_data.get(mac,0)>before:
+                            last_seen=self.state.get(mac,{}).get("soc_pct")
+                            if last_seen==target:
+                                self.recent_confirmed_parameter[mac]=(
+                                    "soc_calibration",target,time.monotonic())
+                                self.emit(mac,"command_status",
+                                    f"Set SOC confirmé par télémétrie : {target} %")
+                                return
+                    await asyncio.sleep(0.25)
+                with self._lock:
+                    if last_seen is None:
+                        message="Set SOC envoyé ; aucune nouvelle mesure pour confirmer"
+                    else:
+                        message=(f"Set SOC envoyé ; valeur BMS = {last_seen} %, "
+                                 "calibration non confirmée")
+                    self.emit(mac,"command_status",message)
+            except Exception as exc:
+                LOG.warning("Set SOC processing failed for %s: %s",mac,exc)
+                with self._lock:
+                    self.emit(mac,"command_status","Échec Set SOC : erreur BLE ou relecture")
+            finally:
+                with self._lock:
+                    self.pending_parameter_writes.discard(mac)
+                    self.pending_parameter_value.pop(mac,None)
+
+        future=asyncio.run_coroutine_threadsafe(perform(),self.loop)
+        def done(f):
+            try:f.result()
+            except Exception as exc:
+                LOG.error("Unexpected Set SOC task error: %s",exc)
+                with self._lock:
+                    self.pending_parameter_writes.discard(mac)
+                    self.pending_parameter_value.pop(mac,None)
+        future.add_done_callback(done)
 
     def _parameter_command(self,mac:str,key:str,payload:bytes)->None:
         p=BY_KEY.get(key)
@@ -754,6 +878,21 @@ class HomeAssistantMQTT:
                                 "mode":"box"})
                 if p.unit:options["unit_of_measurement"]=p.unit
             self._component(mac,p.key,p.kind,p.label,options)
+
+        if self.soc_calibration_supported(mac):
+            self._component(mac,"soc_calibration","number","Set SOC",{
+                "state_topic":root+"/state",
+                "value_template":"{{ value_json.get('soc_pct') }}",
+                "command_topic":root+"/soc_calibration/set",
+                "availability_topic":root+"/availability",
+                "entity_category":"config",
+                "min":0,"max":100,"step":1,"mode":"box",
+                "optimistic":False,"retain":False,
+                "icon":"mdi:battery-sync"
+            })
+        else:
+            # Remove discovery for unsupported BMS or a stale previous session.
+            self.send(f"{self.discovery}/number/{short_id(mac)}_soc_calibration/config","")
         self._component(mac,"write_permission","switch",
             "Allow Parameter Changes",{
                 "state_topic":root+"/write_permission/state",
@@ -934,6 +1073,10 @@ class HomeAssistantMQTT:
                     LOG.info("JK settings 0x01 confirmed for %s (%d parameters)",mac,len(parsed))
                 else:
                     self.info[mac]=parse_info(raw)
+                    if self.info[mac].get("software_version"):
+                        self.info_confirmed.add(mac)
+                    else:
+                        self.info_confirmed.discard(mac)
                 if mac in self.state:
                     if frame_type in (1,3):
                         self.discover(mac,max(16,self.discovered_cells.get(mac,16)))
@@ -942,6 +1085,7 @@ class HomeAssistantMQTT:
             if kind=="lifecycle" and data.get("event") in ("disconnected","stream_stale"):
                 self.emit(mac,"availability","offline")
                 self.last_data.pop(mac,None)
+                self.info_confirmed.discard(mac)
                 self.last_confirmed.pop(mac,None)
                 self.settings.pop(mac,None)
                 self.recent_confirmed_parameter.pop(mac,None)
