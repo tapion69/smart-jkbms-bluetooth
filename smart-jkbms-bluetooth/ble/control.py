@@ -17,6 +17,7 @@ from parameters import BY_REGISTER, build_write
 
 LOG = logging.getLogger("smart_jkbms_ble.control")
 CONFIRM = "I_UNDERSTAND_THERMAL_PROTECTION_RISK"
+SOC_CONFIRM = "I_CONFIRM_SOC_CALIBRATION"
 HEADER = bytes.fromhex("AA 55 90 EB")
 
 
@@ -28,6 +29,20 @@ def temperature_control_frame(disable: bool) -> bytes:
     frame[4] = 0x28
     frame[5] = 0x04
     frame[6] = 1 if disable else 0
+    frame[19] = sum(frame[:19]) & 0xFF
+    return bytes(frame)
+
+
+
+def soc_calibration_frame(value: int) -> bytes:
+    """JK02_32S SOC calibration register 0x6E: one unsigned byte, 0..100."""
+    if type(value) is not int or not 0 <= value <= 100:
+        raise ValueError("Set SOC requires an integer between 0 and 100")
+    frame = bytearray(20)
+    frame[:4] = HEADER
+    frame[4] = 0x6E
+    frame[5] = 0x01
+    frame[6] = value
     frame[19] = sum(frame[:19]) & 0xFF
     return bytes(frame)
 
@@ -91,9 +106,9 @@ class ControlService:
         if not isinstance(mac, str) or mac not in configured:
             return 403, {"error": "bms_not_configured"}
         action = payload.get("action")
-        if action not in {"refresh", "set_temperature_disabled", "write_parameter"}:
+        if action not in {"refresh", "set_temperature_disabled", "write_parameter", "set_soc"}:
             return 400, {"error": "action_not_allowed"}
-        if action in ("write_parameter", "set_temperature_disabled"):
+        if action in ("write_parameter", "set_temperature_disabled", "set_soc"):
             if not bool(cfg.get("allow_parameter_changes", False)):
                 return 403, {"error": "parameter_changes_not_enabled_in_addon"}
             if (self.mqtt_sink is None or
@@ -109,6 +124,16 @@ class ControlService:
                 build_write(register,payload.get("value"))
             except (ValueError,OverflowError) as exc:
                 return 400, {"error": "invalid_parameter_value", "details": str(exc)}
+        if action == "set_soc":
+            if payload.get("confirmation") != SOC_CONFIRM:
+                return 403, {"error": "explicit_soc_confirmation_required"}
+            try:
+                soc_calibration_frame(payload.get("value"))
+            except ValueError:
+                return 400, {"error": "invalid_soc_value"}
+            # The authenticated local API cannot bypass hardware compatibility.
+            if not callable(getattr(self.mqtt_sink, "soc_calibration_supported", None)) or not self.mqtt_sink.soc_calibration_supported(mac):
+                return 403, {"error": "unsupported_or_unverified_soc_calibration"}
         if action == "set_temperature_disabled":
             if payload.get("confirmation") != CONFIRM:
                 return 403, {"error": "explicit_confirmation_required"}
@@ -117,7 +142,7 @@ class ControlService:
         # Keep the 15-second physical write safeguard for *all* BMS parameters.
         # The MQTT layer may ignore duplicate, already-confirmed requests, but
         # distinct writes must still pass this central rate limit.
-        if action in ("set_temperature_disabled", "write_parameter"):
+        if action in ("set_temperature_disabled", "write_parameter", "set_soc"):
             elapsed = asyncio.get_running_loop().time()-self.last_write.get(mac,0.0)
             if elapsed < 15:
                 return 429, {"error":"write_rate_limit_15s",
@@ -131,17 +156,20 @@ class ControlService:
         future = loop.create_future()
         await queue.put(Command(action, payload.get("disable"), future,
                                 payload.get("register"),payload.get("value")) )
-        if action in ("set_temperature_disabled","write_parameter"):
+        if action in ("set_temperature_disabled","write_parameter","set_soc"):
             self.last_write[mac] = loop.time()
             if action == "set_temperature_disabled":
                 LOG.warning("MANUAL JK02 TEMPERATURE PROTECTION WRITE REQUEST for %s: disabled=%s",
                             mac,payload["disable"])
+            elif action == "set_soc":
+                LOG.warning("MANUAL JK02 SOC CALIBRATION REQUEST for %s: target=%d percent",
+                            mac,payload["value"])
             else:
                 LOG.warning("MANUAL JK02 PARAMETER WRITE REQUEST for %s: register=0x%02X",
                             mac,payload["register"])
         try:
             result = await asyncio.wait_for(future, 12)
-            return 202, {"address": mac, "write_sent": action in ("set_temperature_disabled","write_parameter"),
+            return 202, {"address": mac, "write_sent": action in ("set_temperature_disabled","write_parameter","set_soc"),
                          "verified_by_bms": False, "action": action, **result}
         except asyncio.TimeoutError:
             return 504, {"error": "command_timeout_unverified"}
