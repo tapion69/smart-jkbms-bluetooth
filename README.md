@@ -34,6 +34,16 @@ On Android, use a Bluetooth LE scanner such as **[nRF Connect for Mobile](https:
 
 **iOS note:** iPhones usually display an identifier rather than the actual BLE MAC. Use an Android BLE scanner or a Linux/BlueZ device when the MAC is not available.
 
+## Set SOC calibration (v0.3.9, experimental)
+
+A **Set SOC** number entity appears in Home Assistant only for JK-BMS devices with verified **JK02_32S** BLE telemetry and confirmed firmware version **11 or later**. The entity is separate from the normal SOC sensor and from the SOC0/SOC100 voltage settings.
+
+Set SOC changes the **BMS's own** state-of-charge estimate. For example, if a battery reports 15%, entering 14% requests calibration to 14%; the SOC sensor will show 14% **only after the BMS itself reports 14%**. A reported status of "command sent" alone is *not* proof of success. The BMS may subsequently adjust its estimate.
+
+To permit a write, first enable `allow_parameter_changes: true` in the add-on, then enable **Allow Parameter Changes** for that specific BMS in Home Assistant. Go to the BMS's Configuration entities, enter the desired percentage into **Set SOC**, and check **Last Parameter Command** for confirmation. Turn off the BMS permission switch after use. Both permissions default to off and do not persist across broker reconnects; there is also a shared 15-second write cooldown per BMS.
+
+**Caution:** Calibrating SOC may affect inverter charging/discharging logic. Only calibrate against a reliable independent reference, preferably under controlled conditions, and never as a routine correction of a guessed percentage. Incompatible/offline batteries will not expose the control. This is an experimental feature and has not yet been validated on all JK-BMS hardware/firmware variants.
+
 ## ESP32 Bluetooth Proxy (optional)
 
 If Home Assistant is too far from your batteries, place an **ESP32 running ESPHome Bluetooth Proxy** near the JK-BMS devices. The add-on then communicates over Wi-Fi instead of using a local Bluetooth adapter.
