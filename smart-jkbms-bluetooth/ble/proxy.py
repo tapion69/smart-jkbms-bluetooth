@@ -1,7 +1,7 @@
 """ESPHome Bluetooth Proxy transport for JK-BMS (optional, no local BlueZ required).
 
-Proxy mode uses the official ESPHome API and habluetooth's remote GATT
-scanner/client wrappers. It never tries the host's Bluetooth adapter.
+Proxy and hybrid modes start the official ESPHome API and habluetooth remote
+GATT manager. Only explicitly routed local BMS sessions use host BlueZ.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
 
 
 def proxy_enabled(cfg: dict[str, Any]) -> bool:
-    return cfg.get("ble_connection_mode", "local") == "esphome_proxy"
+    return cfg.get("ble_connection_mode", "local") in ("esphome_proxy", "hybrid")
 
 
 def proxy_config(cfg: dict[str, Any]) -> dict[str, str | None]:
