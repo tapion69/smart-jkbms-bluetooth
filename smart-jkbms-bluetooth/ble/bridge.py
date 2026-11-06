@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.12.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.13.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -111,10 +111,11 @@ def addresses(raw: str) -> list[str]:
 
 
 def hybrid_routes(cfg: dict[str, Any]) -> dict[str, list[str]]:
-    """Validate a strict, non-overlapping split of the canonical BMS MAC list.
+    """Validate the two authoritative, non-overlapping hybrid MAC lists.
 
-    Never guess a route from RSSI, nor silently ignore missing addresses:
-    each configured MAC must have exactly one transport.
+    In hybrid mode, bms_addresses is an unused legacy option: every configured
+    MAC is derived from exactly one of these two route-specific lists.
+    Never guess a route based on RSSI or connect a BMS on both radios.
     """
     if cfg.get("ble_connection_mode") != "hybrid":
         raise ValueError("hybrid_routes requires ble_connection_mode=hybrid")
@@ -129,23 +130,25 @@ def hybrid_routes(cfg: dict[str, Any]) -> dict[str, list[str]]:
             raise ValueError(f"{key} contains duplicate Bluetooth MAC addresses")
         return normalized
 
-    all_bms = strict_list("bms_addresses")
     local = strict_list("local_bms_addresses")
     remote = strict_list("proxy_bms_addresses")
     if not local or not remote:
         raise ValueError("Hybrid mode needs at least one local and one ESPHome proxy BMS")
     if set(local) & set(remote):
         raise ValueError("A BMS cannot be assigned to both local and ESPHome proxy")
-    if set(local + remote) != set(all_bms):
-        raise ValueError(
-            "Hybrid routes must contain each bms_addresses MAC exactly once; "
-            "correct local_bms_addresses and proxy_bms_addresses"
-        )
     return {"local": local, "esphome_proxy": remote}
 
 
+def configured_addresses(cfg: dict[str, Any]) -> list[str]:
+    """Canonical MQTT/device list, derived from routes only in hybrid mode."""
+    if cfg.get("ble_connection_mode") == "hybrid":
+        routes = hybrid_routes(cfg)
+        return routes["local"] + routes["esphome_proxy"]
+    return addresses(str(cfg.get("bms_addresses", "")))
+
+
 def hybrid_transport_cfg(cfg: dict[str, Any], transport: str) -> dict[str, Any]:
-    """A route-scoped view. The original bms_addresses remains the MQTT identity."""
+    """A route-scoped view; shared MQTT identity uses configured_addresses()."""
     routes = hybrid_routes(cfg)
     if transport not in routes:
         raise ValueError("Unknown hybrid BLE transport")
@@ -755,7 +758,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.12", note="JK02_single_BIP_option"
+        "bridge_start", version="0.3.13", note="JK02_single_BIP_option"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -790,7 +793,7 @@ async def run_connections(cfg: dict[str, Any]) -> None:
     if bool(cfg.get("persistent_connections", True)):
         # Import lazily, preserving standalone BLE diagnostics/test mode.
         from mqtt_ha import HomeAssistantMQTT
-        publisher = HomeAssistantMQTT(cfg,addresses(str(cfg.get("bms_addresses",""))),
+        publisher = HomeAssistantMQTT(cfg,configured_addresses(cfg),
                                       control=CONTROL)
         await CONTROL.start()
         CONTROL.mqtt_sink = publisher
