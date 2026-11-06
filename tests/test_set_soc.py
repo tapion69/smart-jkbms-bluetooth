@@ -35,7 +35,7 @@ def instance():
     manager=HomeAssistantMQTT(cfg,MACS,client=client)
     manager.connected=True
     for mac in MACS:
-        manager.info[mac]={"software_version":"15.34","device_model":"JK_PB2A16S15P"}
+        manager.info[mac]={"software_version":"19.34","hardware_version":"19A","device_model":"JK_PB2A16S15P"}
         manager.info_confirmed.add(mac)
         manager.state[mac]={"format":"JK02_32S","soc_pct":15}
         manager.last_data[mac]=time.monotonic()
@@ -84,10 +84,12 @@ class SocCalibrationTests(unittest.TestCase):
         m.discover(a,16)  # First advertise a supported device, then retract it.
         self.assertIn(a,m.soc_calibration_discovered)
         cases=[
-            ("JK02_24S","15.34",True),
+            ("JK02_24S","19.34",True),
             ("JK02_32S","10.20",True),
+            ("JK02_32S","15.34",True),   # PB V15: no verified 0x6E support
+            ("JK02_32S","19.33",True),   # below tested JK-PB threshold
             ("JK02_32S","bogus",True),
-            ("JK02_32S","15.34",False),
+            ("JK02_32S","19.34",False),
         ]
         for proto,sw,confirmed in cases:
             m.state[a]["format"]=proto
@@ -101,10 +103,36 @@ class SocCalibrationTests(unittest.TestCase):
                 t==f"homeassistant/number/{short_id(a)}_soc_calibration/config"
                 and v=="" for t,v,_,_ in c.published))
         m.state[a]["format"]="JK02_32S"
-        m.info[a]["software_version"]="15.34"
+        m.info[a]["software_version"]="19.34"
         m.info_confirmed.add(a)
         m.last_data[a]=time.monotonic()-100
         self.assertFalse(m.soc_calibration_supported(a))
+
+    def test_legacy_jk_pb_is_blocked_and_its_retained_discovery_removed_after_upgrade(self):
+        m,c=instance()
+        a=MACS[0]
+        m.info[a]["software_version"]="15.34"
+        m.info[a]["hardware_version"]="15A"
+        self.assertFalse(m.soc_calibration_supported(a))
+        # v0.3.9/10 may have left a retained discovery. No 'known published'
+        # state exists in this new process, but confirmed JK-PB identity
+        # must trigger cleanup.
+        self.assertNotIn(a,m.soc_calibration_discovered)
+        m.discover(a,16)
+        topic=f"homeassistant/number/{short_id(a)}_soc_calibration/config"
+        self.assertIn((topic,"",1,True),c.published)
+        self.assertFalse(any(t==topic and v for t,v,_,_ in c.published))
+        # No writes even when UI commands are injected externally.
+        m._soc_calibration_command(a,b"14")
+        self.assertFalse(m.pending_parameter_writes)
+        self.assertTrue(any("Refus Set SOC" in v for t,v,_,_ in c.published
+                            if t==m.base(a)+"/command_status"))
+
+    def test_non_pb_jk_firmware_eleven_keeps_batmon_support(self):
+        m,_=instance()
+        a=MACS[1]
+        m.info[a]={"device_model":"JK-B2A8S20P","software_version":"11.37"}
+        self.assertTrue(m.soc_calibration_supported(a))
 
     def test_local_endpoint_requires_both_permissions_and_explicit_confirmation(self):
         async def run():
