@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.13 — Simplified hybrid MAC configuration (development preview)
+
+- In `hybrid` mode, **only** `local_bms_addresses` and `proxy_bms_addresses` are required; comma-separated addresses are automatically combined for MQTT Discovery and controls. The old `bms_addresses` field may be empty or contain a prior configuration and is ignored in hybrid mode.
+- Retains duplicate/invalid MAC protection: a battery cannot be assigned to both radios, and a malformed MAC prevents the hybrid setup from starting.
+- Fixes the local authenticated control endpoint to recognize both route-specific BMS lists even when `bms_addresses` is empty, preserving refresh, permissions and protected parameter writes.
+- Preserves `bms_addresses` unchanged for existing `local` and `esphome_proxy` installations, with no MQTT entity-ID changes, firmware writes, transport fallback or changes to BIP/Node-RED flows.
+- Adds regression tests for empty/stale legacy MAC lists, four BMS across two transports, MQTT device membership and command authorization; updates FR/EN configuration help.
+
+
 ## 0.3.12 — Hybrid local Bluetooth + ESPHome Proxy sessions (development preview)
 
 - Added **hybrid** BLE mode to monitor distant JK-BMS packs with both the Home Assistant host Bluetooth adapter and an ESP32 ESPHome Bluetooth Proxy **at the same time**, from one add-on installation.
