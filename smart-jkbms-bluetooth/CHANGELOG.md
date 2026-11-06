@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.10 — Set SOC: avoid dropped writes after settings read (experimental)
+
+- Fixed a **possible race** between JK-BMS read command `0x96` (settings) and the `0x6E` Set SOC calibration write. BatMON documents JK firmware that acknowledges but silently ignores writes arriving while a settings response is still being processed.
+- Now tracks the latest settings-query timestamp independently for each active BMS session and waits for a conservative 2-second quiet window before sending Set SOC.
+- Keeps the existing 15-second write cooldown, per-BMS permissions, no automatic retries and **BMS-confirmed telemetry** as the only success criterion. Reports a diagnostic event when a Set SOC write is delayed.
+- Tested by CI including syntax, Docker image build, BLE and MQTT unit tests. **Not yet proof** that every JK-PB firmware supports manual Set SOC; real-world confirmation remains necessary.
+
+
 ## 0.3.9 — JK02_32S Set SOC calibration (development preview)
 
 - Added a separate **Set SOC** Home Assistant number (0–100%, whole percentages) for each JK-BMS that reports validated JK02_32S telemetry and a confirmed firmware version 11 or newer.
