@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.14 — Hybrid startup sequencing and proxy discovery diagnostics (test)
+
+- Wait up to ten seconds for initial ESPHome scanner registration in hybrid mode.
+- Allow an additional second for proxy advertisements before session scans.
+- Serialize BLE discovery windows, leaving established GATT sessions independent.
+- Add count-only `proxy_scan_summary` diagnostic events.
+- Keep MQTT identities, Node-RED flows, JK02 decoder, BIP and write safeguards unchanged.
+- Field validation required; this may not solve every remote discovery issue.
+
 ## 0.3.13 — Simplified hybrid MAC configuration (development preview)
 
 - In `hybrid` mode, **only** `local_bms_addresses` and `proxy_bms_addresses` are required; comma-separated addresses are automatically combined for MQTT Discovery and controls. The old `bms_addresses` field may be empty or contain a prior configuration and is ignored in hybrid mode.
