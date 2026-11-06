@@ -27,11 +27,13 @@ export BLE_BRIDGE_TOKEN="$(cat /data/.ble_bridge_token)"
 export NODE_PATH="$(npm root -g)"
 export BLE_BRIDGE_ENDPOINT="http://127.0.0.1:1895/internal/ble/events"
 export BLE_OPTIONS_FILE="$OPTIONS"
-export BLE_BMS_ADDRESSES="$(jq -r '.bms_addresses // ""' "$OPTIONS")"
+# Legacy modes keep bms_addresses. Hybrid derives the list from the two
+# route-specific MAC fields, so there is no redundant list to maintain.
+export BLE_BMS_ADDRESSES="$(jq -r 'if .ble_connection_mode == "hybrid" then ((.local_bms_addresses // "") + "," + (.proxy_bms_addresses // "")) else (.bms_addresses // "") end' "$OPTIONS")"
 export BLE_MQTT_ENABLED="$(jq -r '.mqtt_enabled // true' "$OPTIONS")"
 # Persistent anonymous UUID used by the opt-out BIP, never derived from the BMS.
 export SMART_JKBMS_INSTALL_ID="$(/opt/venv/bin/python /addon/ble/installation_id.py)"
-export SMART_JKBMS_VERSION="0.3.12"
+export SMART_JKBMS_VERSION="0.3.13"
 export SEND_BIP="$(jq -r '(.send_bip // true) | if . == true then "true" else "false" end' "$OPTIONS")"
 NR_PID=""
 BLE_PID=""
@@ -45,7 +47,7 @@ shutdown() {
 }
 trap shutdown INT TERM EXIT
 
-echo "[INFO] Smart JK-BMS Bluetooth development v0.3.12"
+echo "[INFO] Smart JK-BMS Bluetooth development v0.3.13"
 echo "[INFO] Node-RED port: 1895"
 echo "[INFO] Starting lightweight JK02 decoder and BLE-to-MQTT bridge"
 
