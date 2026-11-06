@@ -102,7 +102,14 @@ class ControlService:
             return 400, {"error": "invalid_body"}
         cfg = self.options()
         mac = payload.get("address")
-        configured = self.addresses(str(cfg.get("bms_addresses", "")))
+        if cfg.get("ble_connection_mode") == "hybrid":
+            # Hybrid mode derives its complete allowed-device set from both
+            # route-specific lists. The legacy bms_addresses may be blank.
+            configured_raw = (str(cfg.get("local_bms_addresses") or "") + "," +
+                              str(cfg.get("proxy_bms_addresses") or ""))
+        else:
+            configured_raw = str(cfg.get("bms_addresses", ""))
+        configured = self.addresses(configured_raw)
         if not isinstance(mac, str) or mac not in configured:
             return 403, {"error": "bms_not_configured"}
         action = payload.get("action")
