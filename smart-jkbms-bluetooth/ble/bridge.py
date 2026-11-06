@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.11.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.12.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -108,6 +108,49 @@ def addresses(raw: str) -> list[str]:
         if normalized not in result:
             result.append(normalized)
     return result
+
+
+def hybrid_routes(cfg: dict[str, Any]) -> dict[str, list[str]]:
+    """Validate a strict, non-overlapping split of the canonical BMS MAC list.
+
+    Never guess a route from RSSI, nor silently ignore missing addresses:
+    each configured MAC must have exactly one transport.
+    """
+    if cfg.get("ble_connection_mode") != "hybrid":
+        raise ValueError("hybrid_routes requires ble_connection_mode=hybrid")
+
+    def strict_list(key: str) -> list[str]:
+        raw = str(cfg.get(key) or "").strip()
+        entries = [v for v in re.split(r"[,;\\s]+", raw) if v]
+        if any(not MAC_PATTERN.fullmatch(v) for v in entries):
+            raise ValueError(f"{key} contains an invalid Bluetooth MAC address")
+        normalized = [v.upper() for v in entries]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(f"{key} contains duplicate Bluetooth MAC addresses")
+        return normalized
+
+    all_bms = strict_list("bms_addresses")
+    local = strict_list("local_bms_addresses")
+    remote = strict_list("proxy_bms_addresses")
+    if not local or not remote:
+        raise ValueError("Hybrid mode needs at least one local and one ESPHome proxy BMS")
+    if set(local) & set(remote):
+        raise ValueError("A BMS cannot be assigned to both local and ESPHome proxy")
+    if set(local + remote) != set(all_bms):
+        raise ValueError(
+            "Hybrid routes must contain each bms_addresses MAC exactly once; "
+            "correct local_bms_addresses and proxy_bms_addresses"
+        )
+    return {"local": local, "esphome_proxy": remote}
+
+
+def hybrid_transport_cfg(cfg: dict[str, Any], transport: str) -> dict[str, Any]:
+    """A route-scoped view. The original bms_addresses remains the MQTT identity."""
+    routes = hybrid_routes(cfg)
+    if transport not in routes:
+        raise ValueError("Unknown hybrid BLE transport")
+    return {**cfg, "ble_connection_mode": transport,
+            "bms_addresses": ",".join(routes[transport])}
 
 
 async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
@@ -609,7 +652,9 @@ async def find_bluez_connected(
             bus.disconnect()
 
 
-async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
+async def persistent_sessions(
+    initial_cfg: dict[str, Any], *, hybrid_transport: str | None = None
+) -> None:
     """One long-running BLE session per configured BMS; independent reconnection.
 
     Discovery is shared and serialized. Only missing/disconnected BMS are
@@ -621,10 +666,13 @@ async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
     retry_at: dict[str, float] = {}
     first_scan = True
     next_scan = 0.0
-    await forward("persistent_manager_start", mode="one_session_per_BMS")
+    await forward("persistent_manager_start", mode="one_session_per_BMS",
+                  transport=hybrid_transport or initial_cfg.get("ble_connection_mode","local"))
     try:
         while True:
             cfg = options()
+            if hybrid_transport is not None:
+                cfg = hybrid_transport_cfg(cfg, hybrid_transport)
             configured = addresses(str(cfg.get("bms_addresses", "")))
             now = time.monotonic()
 
@@ -699,14 +747,15 @@ async def persistent_sessions(initial_cfg: dict[str, Any]) -> None:
             task.cancel()
         if workers:
             await asyncio.gather(*workers.values(), return_exceptions=True)
-        await forward("persistent_manager_stop")
+        await forward("persistent_manager_stop", transport=hybrid_transport or
+                      initial_cfg.get("ble_connection_mode","local"))
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.11", note="JK02_single_BIP_option"
+        "bridge_start", version="0.3.12", note="JK02_single_BIP_option"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
@@ -715,7 +764,19 @@ async def main() -> None:
     LOG.info("Node-RED diagnostic endpoint ready")
     startup = True
     cfg = options()
-    if not proxy_enabled(cfg):
+    if cfg.get("ble_connection_mode","local") == "hybrid":
+        from proxy import proxy_config
+        try:
+            routes = hybrid_routes(cfg)
+            proxy_config(cfg)
+        except ValueError as exc:
+            LOG.error("Hybrid Bluetooth configuration rejected: %s", exc)
+            await forward("hybrid_configuration_error", error=str(exc))
+            return
+        await forward("hybrid_routes", local_bms_count=len(routes["local"]),
+                      proxy_bms_count=len(routes["esphome_proxy"]),
+                      note="Explicit, non-overlapping routes; no automatic fallback")
+    if cfg.get("ble_connection_mode","local") != "esphome_proxy":
         try:
             await maybe_reset_adapter_on_start(cfg)
         except Exception:
@@ -739,9 +800,28 @@ async def run_connections(cfg: dict[str, Any]) -> None:
                 await asyncio.sleep(10)
                 publisher.watchdog()
         health_task = asyncio.create_task(mqtt_watchdog())
+        workers = []
         try:
-            await persistent_sessions(cfg)
+            if cfg.get("ble_connection_mode") == "hybrid":
+                # Independent discovery/reconnect loops; all sessions still use
+                # the single CONTROL/MQTT publisher and unique MAC identities.
+                workers = [
+                    asyncio.create_task(persistent_sessions(
+                        hybrid_transport_cfg(cfg,"local"),hybrid_transport="local"),
+                        name="jk-hybrid-local"),
+                    asyncio.create_task(persistent_sessions(
+                        hybrid_transport_cfg(cfg,"esphome_proxy"),
+                        hybrid_transport="esphome_proxy"),
+                        name="jk-hybrid-proxy"),
+                ]
+                await asyncio.gather(*workers)
+            else:
+                await persistent_sessions(cfg)
         finally:
+            for task in workers:
+                task.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
             health_task.cancel()
             try:
                 await health_task
@@ -755,7 +835,12 @@ async def run_connections(cfg: dict[str, Any]) -> None:
         while True:
             try:
                 cfg = options()
-                await poll_cycle(cfg, startup=startup)
+                if cfg.get("ble_connection_mode") == "hybrid":
+                    await asyncio.gather(
+                        poll_cycle(hybrid_transport_cfg(cfg,"local"),startup=startup),
+                        poll_cycle(hybrid_transport_cfg(cfg,"esphome_proxy"),startup=startup))
+                else:
+                    await poll_cycle(cfg, startup=startup)
                 startup = False
                 await asyncio.sleep(max(20, int(cfg.get("scan_interval_seconds", 45))))
             except asyncio.CancelledError:
