@@ -67,18 +67,17 @@ An active ESPHome proxy (`bluetooth_proxy: { active: true }`) is required for JK
 
 **Development feature:** proxy connections and reconnection still need testing on real JK-BMS hardware. In particular, test a single BMS before adding more devices. An ESP32 usually starts with three active BLE slots.
 
-## Hybrid mode: local Bluetooth + ESPHome proxy (v0.3.12, experimental)
+## Hybrid mode: local Bluetooth + ESPHome proxy (v0.3.13, experimental)
 
 With `ble_connection_mode: hybrid`, a single add-on can monitor batteries near the Home Assistant host **and** batteries near one remote ESP32 running ESPHome Bluetooth Proxy at the same time. The add-on runs two independent discovery/reconnection managers, but keeps **one MQTT publisher** with the same stable per-MAC entity IDs.
 
-The complete list of batteries still belongs in `bms_addresses`. In hybrid mode, assign **every MAC exactly once** between `local_bms_addresses` and `proxy_bms_addresses`. A duplicate, missing or extra MAC rejects the hybrid setup rather than connecting to an unintended BMS.
+**Simplified configuration (v0.3.13):** in hybrid mode, fill only `local_bms_addresses` for the host Bluetooth adapter and `proxy_bms_addresses` for the ESP32. Separate several MAC addresses with commas. The complete BMS list is created automatically from those two fields, so `bms_addresses` may stay empty — and any old value in it is ignored while in hybrid mode. A duplicated MAC across both lists or an invalid MAC is rejected instead of connecting twice.
 
 Example with four **fictitious** BMS addresses:
 
 ```yaml
 ble_connection_mode: hybrid
 bluetooth_adapter: auto
-bms_addresses: "AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02,AA:BB:CC:DD:EE:03,AA:BB:CC:DD:EE:04"
 local_bms_addresses: "AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02"
 proxy_bms_addresses: "AA:BB:CC:DD:EE:03,AA:BB:CC:DD:EE:04"
 proxy_host: "192.168.1.100"
@@ -96,10 +95,10 @@ For troubleshooting, the logs report `hybrid_routes` with the number of BMSs on 
 
 | Setting | Purpose |
 |---|---|
-| `bms_addresses` | Comma-separated Bluetooth MAC addresses; add one entry per BMS. |
+| `bms_addresses` | Comma-separated Bluetooth MACs for `local` or `esphome_proxy` mode only; ignored in `hybrid`. |
 | `ble_connection_mode` | `local` (default), `esphome_proxy`, or `hybrid`. |
 | `proxy_host` / `proxy_noise_psk` | ESP32 network address and encrypted ESPHome API key for proxy or hybrid mode. |
-| `local_bms_addresses` / `proxy_bms_addresses` | Exclusive per-MAC routing lists, required in hybrid mode only. |
+| `local_bms_addresses` / `proxy_bms_addresses` | Only these two fields are needed for BMS MAC addresses in `hybrid` mode; each MAC goes into one list. |
 | `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3` in local mode. |
 | `persistent_connections` | Keep sessions connected and reconnect automatically (recommended). |
 | `mqtt_host` / `mqtt_port` | Usually `core-mosquitto` / `1883`. |
