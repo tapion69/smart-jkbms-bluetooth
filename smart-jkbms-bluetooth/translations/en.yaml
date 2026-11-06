@@ -27,8 +27,8 @@ configuration:
     name: Show all BLE devices
     description: Include unnamed and non-JK devices for troubleshooting.
   bms_addresses:
-    name: JK-BMS Bluetooth addresses
-    description: Comma-separated MAC addresses; leave empty for discovery only.
+    name: BMS MAC addresses (local / proxy-only)
+    description: Comma-separated MAC addresses for local or esphome_proxy mode. Not needed in hybrid mode; use the two route lists instead.
   connection_probe_seconds:
     name: Connection probe duration (seconds)
     description: Duration of legacy short probe sessions. The standard persistent mode retrieves settings and measurements automatically.
