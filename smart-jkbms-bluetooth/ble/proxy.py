@@ -94,6 +94,18 @@ async def proxy_session(
     try:
         if notify:
             await notify("proxy_connecting", host=host, port=6053)
+        # Wait for remote scanner registration before starting hybrid discovery.
+        # Limit the wait so an offline ESP32 cannot block local sessions.
+        if cfg.get("ble_connection_mode") == "hybrid":
+            try:
+                await asyncio.wait_for(asyncio.shield(startup), timeout=10)
+                if notify:
+                    await notify("proxy_startup_barrier_complete", host=host)
+                await asyncio.sleep(1)
+            except asyncio.TimeoutError:
+                LOG.warning("Proxy startup not ready within 10s; local hybrid BMSs continue")
+                if notify:
+                    await notify("proxy_startup_barrier_timeout", host=host)
         yield
     finally:
         # Stop reconnect logic first; it also cancels unfinished startup.
