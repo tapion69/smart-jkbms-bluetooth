@@ -22,7 +22,7 @@ D="C8:47:80:1A:40:04"
 
 def cfg(**kwargs):
     return {"ble_connection_mode":"hybrid",
-            "bms_addresses":",".join((A,B,C,D)),
+            "bms_addresses":"",
             "local_bms_addresses":f"{A},{B}",
             "proxy_bms_addresses":f"{C},{D}",
             "proxy_host":"192.168.1.100",
@@ -46,21 +46,18 @@ class HybridTests(unittest.TestCase):
         self.assertEqual(remote["ble_connection_mode"],"esphome_proxy")
         self.assertEqual(bridge.addresses(local["bms_addresses"]),[A,B])
         self.assertEqual(bridge.addresses(remote["bms_addresses"]),[C,D])
-        self.assertEqual(options["bms_addresses"],",".join((A,B,C,D)))
+        self.assertEqual(options["bms_addresses"],"")
+        self.assertEqual(bridge.configured_addresses(options),[A,B,C,D])
 
     def test_invalid_or_ambiguous_routing_is_fail_closed(self):
         base=cfg()
         changes=[
             {"local_bms_addresses":A+","+C,"proxy_bms_addresses":C+","+D},
-            {"local_bms_addresses":A,"proxy_bms_addresses":C+","+D},
-            {"local_bms_addresses":A+","+B,"proxy_bms_addresses":C},
             {"local_bms_addresses":A+","+B+","+D,"proxy_bms_addresses":C+","+D},
             {"local_bms_addresses":A+","+B+","+B,"proxy_bms_addresses":C+","+D},
             {"local_bms_addresses":A+",00:00:00:00:00:0X","proxy_bms_addresses":C+","+D},
             {"local_bms_addresses":"","proxy_bms_addresses":",".join((A,B,C,D))},
             {"local_bms_addresses":",".join((A,B,C,D)),"proxy_bms_addresses":""},
-            {"local_bms_addresses":A+","+B,"proxy_bms_addresses":C+","+D,
-             "bms_addresses":A+","+B+","+C+","+D+",AA:BB:CC:DD:EE:FF"},
         ]
         for change in changes:
             candidate={**base,**change}
@@ -70,6 +67,35 @@ class HybridTests(unittest.TestCase):
             bridge.hybrid_routes({"ble_connection_mode":"local"})
         with self.assertRaises(ValueError):
             bridge.hybrid_transport_cfg(base,"unknown")
+
+
+    def test_hybrid_ignores_legacy_bms_addresses_on_upgrade(self):
+        for legacy in ("", A, ",".join((A,B,C,D)),
+                       "AA:BB:CC:DD:EE:FF", "this is not a MAC"):
+            options=cfg(bms_addresses=legacy)
+            self.assertEqual(bridge.hybrid_routes(options),
+                             {"local":[A,B],"esphome_proxy":[C,D]})
+            self.assertEqual(bridge.configured_addresses(options),[A,B,C,D])
+
+    def test_control_service_authorizes_hybrid_addresses_without_global_list(self):
+        from control import ControlService
+        async def run():
+            options=cfg()
+            service=ControlService(lambda:options,bridge.addresses)
+            # No worker registered -> 409, not 'bms_not_configured' (403).
+            for mac in (A,B,C,D):
+                status,response=await service.dispatch({"address":mac,"action":"refresh"})
+                self.assertEqual(status,409)
+                self.assertEqual(response["error"],
+                                 "bms_not_connected_or_no_persistent_session")
+            status,response=await service.dispatch({
+                "address":"AA:BB:CC:DD:EE:FF","action":"refresh"})
+            self.assertEqual(status,403)
+            self.assertEqual(response["error"],"bms_not_configured")
+            options["ble_connection_mode"]="local"
+            status,response=await service.dispatch({"address":A,"action":"refresh"})
+            self.assertEqual(status,403) # Legacy mode uses bms_addresses.
+        asyncio.run(run())
 
     def test_old_modes_do_not_consult_hybrid_assignments(self):
         self.assertFalse(proxy.proxy_enabled({"ble_connection_mode":"local"}))
