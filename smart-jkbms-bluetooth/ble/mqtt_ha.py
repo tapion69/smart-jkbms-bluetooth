@@ -468,16 +468,31 @@ class HomeAssistantMQTT:
 
 
     def soc_calibration_supported(self, mac: str) -> bool:
-        """Only a decoded JK02_32S stream and verified firmware >=11 permit 0x6E.
+        """Require verified JK02_32S, firmware and family-specific evidence.
+
+        Generic JK fw>=11 follows BatMON; JK-PB v15 is NOT verified for
+        this write. Real BLE capture confirms JK-PB hw19A/sw19.34 only.
         Device-info evidence is invalidated on each BLE disconnection.
         """
         if mac not in self.info_confirmed:
             return False
         if self.state.get(mac,{}).get("format")!="JK02_32S":
             return False
-        version=self.info.get(mac,{}).get("software_version")
-        match=re.fullmatch(r"(?:V)?(\d+)\.\d+(?:\.\d+)?", str(version or "").strip(),re.I)
-        if not match or int(match.group(1))<11:
+        info=self.info.get(mac,{})
+        model=str(info.get("device_model") or "").upper().replace("-","_")
+        if not model:
+            return False
+        version=info.get("software_version")
+        match=re.fullmatch(r"(?:V)?(\d+)\.(\d+)(?:\.\d+)?",str(version or "").strip(),re.I)
+        if not match:
+            return False
+        firmware=(int(match.group(1)),int(match.group(2)))
+        if firmware[0]<11:
+            return False
+        # JK-PB v15 supports JK02_32S telemetry, but that does NOT prove
+        # manual SOC calibration. Captured and verified on JK-PB 19A/19.34
+        # in syssi/esphome-jk-bms issue #1051 (August 2026).
+        if model.startswith(("JK_PB","JKPB")) and firmware<(19,34):
             return False
         latest=self.last_data.get(mac,0.0)
         return latest>0 and time.monotonic()-latest<30
@@ -892,9 +907,14 @@ class HomeAssistantMQTT:
                 "icon":"mdi:battery-sync"
             })
             self.soc_calibration_discovered.add(mac)
-        elif mac in self.soc_calibration_discovered:
-            # Tombstone only an entity which this process previously published.
-            # Avoid empty discovery configs during normal first-run read-only setup.
+        elif mac in self.soc_calibration_discovered or (
+            # On upgrade from v0.3.9/10, an unsupported JK-PB has an old
+            # retained MQTT discovery even though this process did not
+            # publish it. Clear it once device info is confirmed.
+            mac in self.info_confirmed and
+            str(self.info.get(mac,{}).get("device_model") or "")
+                .upper().replace("-","_").startswith(("JK_PB","JKPB"))
+        ):
             self.send(f"{self.discovery}/number/{short_id(mac)}_soc_calibration/config","")
             self.soc_calibration_discovered.discard(mac)
         self._component(mac,"write_permission","switch",
