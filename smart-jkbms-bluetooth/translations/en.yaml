@@ -1,10 +1,16 @@
 configuration:
   ble_connection_mode:
     name: Bluetooth connection mode
-    description: local uses the Home Assistant host adapter; esphome_proxy uses a remote ESP32 over Wi-Fi.
+    description: local uses the Home Assistant Bluetooth adapter; esphome_proxy uses an ESP32 over Wi-Fi; hybrid uses both with explicit per-BMS MAC routing.
   proxy_host:
     name: ESPHome proxy address
-    description: LAN IPv4 or hostname of your ESP32 proxy, without the port. Only used in esphome_proxy mode.
+    description: LAN IPv4 or hostname of the ESP32, without the port. Used in esphome_proxy and hybrid modes.
+  local_bms_addresses:
+    name: Local Bluetooth BMS addresses (hybrid)
+    description: Comma-separated MAC addresses assigned to the host Bluetooth adapter. Hybrid mode only.
+  proxy_bms_addresses:
+    name: ESP32 proxy BMS addresses (hybrid)
+    description: Comma-separated MAC addresses assigned to the ESPHome proxy. Hybrid mode only.
   proxy_noise_psk:
     name: ESPHome encrypted API key
     description: ESPHome api.encryption.key. Leave blank only if the ESPHome API is not encrypted.
