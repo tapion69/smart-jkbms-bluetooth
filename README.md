@@ -21,7 +21,7 @@ Monitor multiple JK-BMS batteries over **Bluetooth Low Energy** and view their r
 ## Installation
 
 1. Install and configure **Mosquitto broker** and the Home Assistant **MQTT integration**.
-2. Ensure Bluetooth works on your Home Assistant host (built-in or USB adapter).
+2. For `local` and `hybrid` modes, ensure Bluetooth works on the Home Assistant host (built-in or USB adapter). Proxy-only mode does not require a local radio.
 3. Open **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add:
    `https://github.com/tapion69/smart-jkbms-bluetooth`
 4. Install **Smart JK-BMS Bluetooth (Development)**.
@@ -67,13 +67,39 @@ An active ESPHome proxy (`bluetooth_proxy: { active: true }`) is required for JK
 
 **Development feature:** proxy connections and reconnection still need testing on real JK-BMS hardware. In particular, test a single BMS before adding more devices. An ESP32 usually starts with three active BLE slots.
 
+## Hybrid mode: local Bluetooth + ESPHome proxy (v0.3.12, experimental)
+
+With `ble_connection_mode: hybrid`, a single add-on can monitor batteries near the Home Assistant host **and** batteries near one remote ESP32 running ESPHome Bluetooth Proxy at the same time. The add-on runs two independent discovery/reconnection managers, but keeps **one MQTT publisher** with the same stable per-MAC entity IDs.
+
+The complete list of batteries still belongs in `bms_addresses`. In hybrid mode, assign **every MAC exactly once** between `local_bms_addresses` and `proxy_bms_addresses`. A duplicate, missing or extra MAC rejects the hybrid setup rather than connecting to an unintended BMS.
+
+Example with four **fictitious** BMS addresses:
+
+```yaml
+ble_connection_mode: hybrid
+bluetooth_adapter: auto
+bms_addresses: "AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02,AA:BB:CC:DD:EE:03,AA:BB:CC:DD:EE:04"
+local_bms_addresses: "AA:BB:CC:DD:EE:01,AA:BB:CC:DD:EE:02"
+proxy_bms_addresses: "AA:BB:CC:DD:EE:03,AA:BB:CC:DD:EE:04"
+proxy_host: "192.168.1.100"
+proxy_noise_psk: "YOUR_ESPHOME_API_ENCRYPTION_KEY"
+persistent_connections: true
+```
+
+Make sure the host Bluetooth adapter is functional and the ESPHome active proxy (`bluetooth_proxy: { active: true }`) is reachable on TCP **6053**. The encryption key comes from the ESP32 ESPHome `api.encryption.key`; leave `proxy_noise_psk` blank only if its API intentionally has no encryption.
+
+**Important:** there is no automatic local/proxy fallback and no cross-transport connection attempt. If an ESP32 goes offline, locally routed batteries keep running; remotely routed BMSs reconnect through their assigned proxy only. An ESP32 has a limited number of simultaneous active connections. Only **one ESPHome proxy** is supported per installation in v0.3.12.
+
+For troubleshooting, the logs report `hybrid_routes` with the number of BMSs on each transport, as well as `persistent_manager_start` and `scan_start` events. The old `local` and `esphome_proxy` modes remain unchanged. As with all new BLE transport features, **real mixed local+proxy hardware validation is still required**.
+
 ## Main settings
 
 | Setting | Purpose |
 |---|---|
 | `bms_addresses` | Comma-separated Bluetooth MAC addresses; add one entry per BMS. |
-| `ble_connection_mode` | `local` (default) or `esphome_proxy`. |
-| `proxy_host` / `proxy_noise_psk` | ESP32 network address and encrypted ESPHome API key, only for proxy mode. |
+| `ble_connection_mode` | `local` (default), `esphome_proxy`, or `hybrid`. |
+| `proxy_host` / `proxy_noise_psk` | ESP32 network address and encrypted ESPHome API key for proxy or hybrid mode. |
+| `local_bms_addresses` / `proxy_bms_addresses` | Exclusive per-MAC routing lists, required in hybrid mode only. |
 | `bluetooth_adapter` | `auto` (recommended) or a specific `hci0`–`hci3` in local mode. |
 | `persistent_connections` | Keep sessions connected and reconnect automatically (recommended). |
 | `mqtt_host` / `mqtt_port` | Usually `core-mosquitto` / `1883`. |
