@@ -42,6 +42,8 @@ Set SOC changes the **BMS's own** state-of-charge estimate. For example, if a ba
 
 To permit a write, first enable `allow_parameter_changes: true` in the add-on, then enable **Allow Parameter Changes** for that specific BMS in Home Assistant. Go to the BMS's Configuration entities, enter the desired percentage into **Set SOC**, and check **Last Parameter Command** for confirmation. Turn off the BMS permission switch after use. Both permissions default to off and do not persist across broker reconnects; there is also a shared 15-second write cooldown per BMS.
 
+**Timing protection (v0.3.10):** Set SOC waits for a quiet period after the latest JK settings read (`0x96`) to avoid a possible firmware race that can silently discard writes. This does not guarantee that every JK firmware supports Set SOC. A non-confirmed command is never retried automatically.
+
 **Caution:** Calibrating SOC may affect inverter charging/discharging logic. Only calibrate against a reliable independent reference, preferably under controlled conditions, and never as a routine correction of a guessed percentage. Incompatible/offline batteries will not expose the control. This is an experimental feature and has not yet been validated on all JK-BMS hardware/firmware variants.
 
 ## ESP32 Bluetooth Proxy (optional)
