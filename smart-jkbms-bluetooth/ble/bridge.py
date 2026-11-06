@@ -1,4 +1,4 @@
-"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.9.
+"""Smart JK-BMS BLE diagnostics bridge, development milestone v0.3.10.
 
 Read-only: scans host BlueZ adapters, probes connections to configured JK-BMS
 devices, optionally observes FFE1 notifications, and reports raw events to
@@ -32,7 +32,15 @@ JK_READ_COMMANDS = (0x97, 0x96)
 JK_WRITE_HEADER = bytes.fromhex("AA 55 90 EB")
 RESET_MARKER = Path("/data/.ble_adapter_reset_last")
 RESET_COOLDOWN_SECONDS = 3600
+SOC_SETTINGS_QUERY_SETTLE_SECONDS = 2.0  # Conservative window, BatMON waits >=1s after settings response
 CONTROL = ControlService(options=lambda: options(), addresses=lambda raw: addresses(raw))
+
+
+def soc_query_settle_remaining(last_query_time: float, now: float) -> float:
+    """Prevent JK firmware dropping 0x6E while it completes a 0x96 response."""
+    if last_query_time <= 0:
+        return 0.0
+    return max(0.0, SOC_SETTINGS_QUERY_SETTLE_SECONDS - (now - last_query_time))
 
 
 def build_read_command(command: int) -> bytes:
@@ -338,6 +346,8 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
 
             await client.start_notify(notify_char, on_notification)
 
+            last_settings_query_sent = {"time": 0.0}
+
             async def send_read_handshake(
                 reason: str, commands: tuple[int, ...] = JK_READ_COMMANDS
             ) -> list[str]:
@@ -354,6 +364,8 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                 sent = []
                 for command in commands:
                     packet = build_read_command(command)
+                    if command == 0x96:
+                        last_settings_query_sent["time"] = time.monotonic()
                     await client.write_gatt_char(write_char, packet, response=response)
                     await forward(
                         "read_request_sent", address=address,
@@ -399,11 +411,23 @@ async def probe(address: str, cfg: dict[str, Any], device: BLEDevice, *, persist
                                 elif command.action == "set_soc":
                                     if write_char is None:
                                         raise RuntimeError("BLE write characteristic unavailable")
+                                    # Some JK firmwares ACK but ignore writes sent
+                                    # while still processing a recent 0x96 query.
+                                    wait_s = soc_query_settle_remaining(
+                                        last_settings_query_sent["time"], time.monotonic())
+                                    if wait_s > 0:
+                                        await forward("soc_calibration_wait", address=address,
+                                                      after_command="0x96",
+                                                      wait_seconds=round(wait_s, 2))
+                                        await asyncio.sleep(wait_s)
+                                    if not client.is_connected or link_lost.is_set():
+                                        raise ConnectionError("BMS disconnected before Set SOC write")
                                     packet = soc_calibration_frame(command.value)
                                     response = "write-without-response" not in write_char.properties
                                     await client.write_gatt_char(write_char, packet, response=response)
                                     await forward("soc_calibration_sent", address=address,
                                                   register="0x6E", confirmed_by_bms=False)
+                                    await asyncio.sleep(0.2)
                                     result = {"register": "0x6E"}
                                 elif command.action == "set_temperature_disabled":
                                     if write_char is None:
@@ -682,7 +706,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.9", note="JK02_single_BIP_option"
+        "bridge_start", version="0.3.10", note="JK02_single_BIP_option"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
