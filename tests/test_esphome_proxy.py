@@ -130,7 +130,7 @@ class ProxyOptionsTests(unittest.TestCase):
         self.assertIn("scanner_class.discover(return_adv=True)",source)
         self.assertIn("async with client_class(device",source)
         self.assertIn("if not wanted or proxy_enabled(cfg):",source)
-        self.assertIn("if not proxy_enabled(cfg):",source)
+        self.assertIn('cfg.get("ble_connection_mode","local") != "esphome_proxy"',source)
         self.assertIn("async with proxy_session(cfg, forward)",source)
 
 
