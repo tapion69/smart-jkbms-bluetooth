@@ -33,6 +33,15 @@ class BleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 bridge.build_read_command(forbidden)
 
+    def test_soc_calibration_waits_for_recent_0x96_before_write(self):
+        # A 0x6E command immediately after a settings read may be ACKed
+        # but ignored by JK firmware (documented in BatMON).
+        self.assertEqual(bridge.soc_query_settle_remaining(0.0, 100.0), 0.0)
+        self.assertAlmostEqual(bridge.soc_query_settle_remaining(100.0, 100.5), 1.5)
+        self.assertAlmostEqual(bridge.soc_query_settle_remaining(100.0, 101.8), 0.2)
+        self.assertEqual(bridge.soc_query_settle_remaining(100.0, 102.0), 0.0)
+        self.assertEqual(bridge.soc_query_settle_remaining(100.0, 130.0), 0.0)
+
     def test_scan_returns_original_ble_device(self):
         mac = "C8:47:80:1A:27:12"
         device = SimpleNamespace(name="Batterie 2-02")
