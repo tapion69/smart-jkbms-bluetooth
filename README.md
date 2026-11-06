@@ -34,9 +34,9 @@ On Android, use a Bluetooth LE scanner such as **[nRF Connect for Mobile](https:
 
 **iOS note:** iPhones usually display an identifier rather than the actual BLE MAC. Use an Android BLE scanner or a Linux/BlueZ device when the MAC is not available.
 
-## Set SOC calibration (v0.3.9, experimental)
+## Set SOC calibration (v0.3.11, experimental)
 
-A **Set SOC** number entity appears in Home Assistant only for JK-BMS devices with verified **JK02_32S** BLE telemetry and confirmed firmware version **11 or later**. The entity is separate from the normal SOC sensor and from the SOC0/SOC100 voltage settings.
+A **Set SOC** number entity appears in Home Assistant only for BMS devices with verified **JK02_32S** BLE telemetry and a supported firmware. For **JK-PB inverter BMS**, firmware below **19.34** is blocked: a real JK_PB2A16S15P on hardware 15A / firmware 15.34 accepted the Bluetooth transmission but did **not** change SOC. On JK-PB hardware 19A / firmware 19.34, command `0x6E` has been verified in [ESPHome JK-BMS issue #1051](https://github.com/syssi/esphome-jk-bms/issues/1051). Compatibility of other variants is not guaranteed. Other supported JK02_32S families retain the previous firmware >=11 rule. The entity is separate from the normal SOC sensor and from the SOC0/SOC100 voltage settings.
 
 Set SOC changes the **BMS's own** state-of-charge estimate. For example, if a battery reports 15%, entering 14% requests calibration to 14%; the SOC sensor will show 14% **only after the BMS itself reports 14%**. A reported status of "command sent" alone is *not* proof of success. The BMS may subsequently adjust its estimate.
 
@@ -44,7 +44,7 @@ To permit a write, first enable `allow_parameter_changes: true` in the add-on, t
 
 **Timing protection (v0.3.10):** Set SOC waits for a quiet period after the latest JK settings read (`0x96`) to avoid a possible firmware race that can silently discard writes. This does not guarantee that every JK firmware supports Set SOC. A non-confirmed command is never retried automatically.
 
-**Caution:** Calibrating SOC may affect inverter charging/discharging logic. Only calibrate against a reliable independent reference, preferably under controlled conditions, and never as a routine correction of a guessed percentage. Incompatible/offline batteries will not expose the control. This is an experimental feature and has not yet been validated on all JK-BMS hardware/firmware variants.
+**Caution:** Calibrating SOC may affect inverter charging/discharging logic. Only calibrate against a reliable independent reference, preferably under controlled conditions, and never as a routine correction of a guessed percentage. Incompatible/offline batteries will not expose the control; a previously published entity is removed from MQTT discovery after the device's information is confirmed. This is an experimental feature and has not yet been validated on all JK-BMS hardware/firmware variants.
 
 ## ESP32 Bluetooth Proxy (optional)
 
