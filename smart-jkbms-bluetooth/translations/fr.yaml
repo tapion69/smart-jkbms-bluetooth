@@ -27,8 +27,8 @@ configuration:
     name: Afficher tous les appareils BLE
     description: Afficher aussi les périphériques non identifiés comme JK-BMS.
   bms_addresses:
-    name: Adresses Bluetooth JK-BMS
-    description: Adresses MAC séparées par des virgules. Vider pour découvrir uniquement.
+    name: Adresses MAC BMS (local ou proxy seul)
+    description: En mode local ou esphome_proxy, indiquer les MAC séparées par des virgules. En mode hybrid, laisser vide et utiliser uniquement les deux listes local/proxy.
   connection_probe_seconds:
     name: Durée de connexion d'essai (secondes)
     description: Connexion Bluetooth en lecture seule, sans commande de lecture JK-BMS.
