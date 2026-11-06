@@ -26,6 +26,7 @@ from parameters import build_write
 from proxy import ble_classes, proxy_enabled, proxy_session
 
 LOG = logging.getLogger("smart_jkbms_ble")
+BLE_SCAN_LOCK = asyncio.Lock()  # Serialize discovery windows; never GATT sessions.
 FFE1 = "0000ffe1-0000-1000-8000-00805f9b34fb"
 MAC_PATTERN = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
 JK_READ_COMMANDS = (0x97, 0x96)
@@ -167,15 +168,17 @@ async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
     try:
         scanner_class = (ble_classes(cfg)[0] if proxy_enabled(cfg)
                          else BleakScanner)
-        if proxy_enabled(cfg):
-            # The proxy's advertisements are populated asynchronously over
-            # the ESPHome API; HaBleakScannerWrapper reads that shared cache.
-            await asyncio.sleep(duration)
-            detected = await scanner_class.discover(return_adv=True)
-        else:
-            detected = await scanner_class.discover(
-                timeout=duration, return_adv=True, **scan_kwargs(adapter)
-            )
+        # Avoid overlapping host and ESPHome discovery windows in hybrid mode.
+        # Active GATT sessions remain fully independent.
+        async with BLE_SCAN_LOCK:
+            if proxy_enabled(cfg):
+                # ESPHome advertisements asynchronously populate shared cache.
+                await asyncio.sleep(duration)
+                detected = await scanner_class.discover(return_adv=True)
+            else:
+                detected = await scanner_class.discover(
+                    timeout=duration, return_adv=True, **scan_kwargs(adapter)
+                )
         jk_count = 0
         found: dict[str, BLEDevice] = {}
         for address, (device, advertisement) in detected.items():
@@ -195,6 +198,11 @@ async def scan(cfg: dict[str, Any]) -> dict[str, BLEDevice]:
                 candidate=is_candidate,
                 adapter=adapter,
             )
+        if proxy_enabled(cfg):
+            await forward("proxy_scan_summary", scanned_count=len(detected),
+                          configured_count=len(known_addresses),
+                          configured_seen=sum(a in found for a in known_addresses),
+                          candidate_count=jk_count)
         await forward("scan_complete", scanned_count=len(detected), jk_candidates=jk_count)
         return found
     except Exception as exc:
@@ -758,7 +766,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     attempt = 0
     while not await forward(
-        "bridge_start", version="0.3.13", note="JK02_single_BIP_option"
+        "bridge_start", version="0.3.14", note="JK02_single_BIP_option"
     ):
         if attempt % 10 == 0:
             LOG.info("Waiting for Node-RED HTTP flow on port 1895...")
