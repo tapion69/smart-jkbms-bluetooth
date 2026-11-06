@@ -121,7 +121,7 @@ def hybrid_routes(cfg: dict[str, Any]) -> dict[str, list[str]]:
 
     def strict_list(key: str) -> list[str]:
         raw = str(cfg.get(key) or "").strip()
-        entries = [v for v in re.split(r"[,;\\s]+", raw) if v]
+        entries = [v for v in re.split(r"[,;\s]+", raw) if v]
         if any(not MAC_PATTERN.fullmatch(v) for v in entries):
             raise ValueError(f"{key} contains an invalid Bluetooth MAC address")
         normalized = [v.upper() for v in entries]
