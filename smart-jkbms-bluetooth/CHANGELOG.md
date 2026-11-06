@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.12 — Hybrid local Bluetooth + ESPHome Proxy sessions (development preview)
+
+- Added **hybrid** BLE mode to monitor distant JK-BMS packs with both the Home Assistant host Bluetooth adapter and an ESP32 ESPHome Bluetooth Proxy **at the same time**, from one add-on installation.
+- Explicit, disjoint MAC address routes: `bms_addresses` remains the complete device list; `local_bms_addresses` and `proxy_bms_addresses` partition it exactly. Missing, duplicate, unknown or malformed routes fail closed on startup; no automatic cross-radio fallback.
+- Two independent persistent BLE discovery/reconnection managers run concurrently. One failed ESP32 does not prevent locally routed BMSs from connecting. Hybrid also supports the existing non-persistent short-probe mode.
+- Preserves a **single** MQTT Discovery publisher, stable per-BMS entity/unique IDs, control permissions, confirmed parameter readback, Set SOC compatibility restrictions and BIP/Node-RED pipeline.
+- Adds French and English add-on configuration translations, configuration examples and detailed hybrid routing diagnostics.
+- Automated regression checks cover four BMSs divided across local/proxy, a missing ESP32, single shared MQTT publisher, fail-closed route validation, local/proxy regression tests and Docker image build.
+- **Hardware preview:** real local BlueZ + ESPHome Proxy concurrency remains to be tested by users. This release supports **one ESPHome proxy**, not multiple remote proxies.
+
+
 ## 0.3.11 — Fix JK-PB Set SOC compatibility detection (development preview)
 
 - Corrected the v0.3.9/v0.3.10 assumption that any JK02_32S JK-PB firmware >= 11 supports manual SOC calibration. Real tests on JK_PB2A16S15P, HW 15A, FW 15.34 **did not change the BMS SOC** despite successful transmission of register `0x6E`.
