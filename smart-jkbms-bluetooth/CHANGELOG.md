@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.11 — Fix JK-PB Set SOC compatibility detection (development preview)
+
+- Corrected the v0.3.9/v0.3.10 assumption that any JK02_32S JK-PB firmware >= 11 supports manual SOC calibration. Real tests on JK_PB2A16S15P, HW 15A, FW 15.34 **did not change the BMS SOC** despite successful transmission of register `0x6E`.
+- A documented BLE capture with confirmed functioning writes exists for **JK-PB hardware 19A, firmware 19.34** (syssi/esphome-jk-bms issue #1051). JK-PB firmware **below 19.34** therefore no longer exposes Set SOC and will refuse the command. This is a cautious compatibility gate, not a guarantee for every newer device.
+- Clears old retained Home Assistant MQTT discovery for unsupported JK-PB devices when their device information is confirmed, including upgrades from v0.3.9 and v0.3.10.
+- Preserves the separate Set SOC function for other JK02_32S BMS families, existing safeguards, Bluetooth transport, four-or-more independently configured BMS devices, and all existing MQTT IDs.
+- New regression tests cover JK-PB firmware 15.34 and 19.33 rejection, 19.34 discovery, retained-entity cleanup, and non-PB JK firmware 11.x support. No firmware flashing or BMS writes occur during this update.
+
+
 ## 0.3.10 — Set SOC: avoid dropped writes after settings read (experimental)
 
 - Fixed a **possible race** between JK-BMS read command `0x96` (settings) and the `0x6E` Set SOC calibration write. BatMON documents JK firmware that acknowledges but silently ignores writes arriving while a settings response is still being processed.
